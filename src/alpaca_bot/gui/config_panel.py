@@ -107,6 +107,9 @@ class ConfigPanel:
             'log_level': tk.StringVar(value='INFO'),
             'log_to_file': tk.BooleanVar(value=True),
             'max_log_files': tk.IntVar(value=10),
+            
+            # Aggressive mode
+            'aggressive_mode': tk.BooleanVar(value=False),
         })
     
     def _create_widgets(self) -> None:
@@ -184,6 +187,17 @@ class ConfigPanel:
         self._create_labeled_spinbox(macd_frame, "Fast Period:", 'macd_fast', 5, 50, row=0)
         self._create_labeled_spinbox(macd_frame, "Slow Period:", 'macd_slow', 10, 100, row=1)
         self._create_labeled_spinbox(macd_frame, "Signal Period:", 'macd_signal', 5, 20, row=2)
+        
+        # Aggressive mode section
+        aggressive_frame = ttk.LabelFrame(scrollable_frame, text="Trading Mode", padding=10)
+        aggressive_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        aggressive_cb = ttk.Checkbutton(
+            aggressive_frame,
+            text="Aggressive Mode (Higher risk, more frequent trades)",
+            variable=self.config_vars['aggressive_mode']
+        )
+        aggressive_cb.pack(anchor=tk.W, pady=2)
         
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")

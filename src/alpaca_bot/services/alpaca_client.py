@@ -196,7 +196,7 @@ class AlpacaClient:
             if self.error_handler.is_circuit_breaker_open("get_order"):
                 raise APIConnectionError("Circuit breaker is open for order operations")
             
-            return self.api.get_order_by_id(order_id)
+            return self.api.get_order(order_id)
         except Exception as e:
             self.error_handler.handle_api_error(e, "get_order")
             raise

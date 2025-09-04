@@ -595,6 +595,15 @@ class MainWindow:
         def _update_orders():
             self._update_orders_display()
         
+        def _update_account():
+            if hasattr(self, 'alpaca_client') and self.alpaca_client:
+                try:
+                    account = self.alpaca_client.get_account()
+                    if account:
+                        self._update_account_info(account)
+                except Exception as e:
+                    self.logger.error(f"Error updating account info: {e}")
+        
         def _update_performance():
             if hasattr(self, 'performance_display'):
                 # Get current trades from strategy if available
@@ -617,44 +626,76 @@ class MainWindow:
         )
         
         safe_execute(
+            _update_account,
+            default_return=None,
+            log_errors=True
+        )
+        
+        safe_execute(
             _update_performance,
             default_return=None,
             log_errors=True
         )
     
     def _update_positions_display(self) -> None:
-        """Update the positions display."""
+        """Update the positions display with actual Alpaca positions."""
         try:
             # Clear existing items
             for item in self.positions_tree.get_children():
                 self.positions_tree.delete(item)
             
-            if not self.strategy:
-                return
-            
-            # Get current positions
-            for symbol, trade in self.strategy.active_positions.items():
-                try:
-                    # Get current quote
-                    quote = self.alpaca_client.get_latest_quote(symbol)
-                    current_price = quote.bid if quote else trade.entry_price
-                    
-                    # Calculate P&L
-                    pnl = (current_price - trade.entry_price) * trade.quantity
-                    pnl_pct = (current_price - trade.entry_price) / trade.entry_price * 100
-                    
-                    # Insert into treeview
-                    self.positions_tree.insert('', 'end', values=(
-                        symbol,
-                        trade.quantity,
-                        f"${trade.entry_price:.2f}",
-                        f"${current_price:.2f}",
-                        f"${pnl:+.2f}",
-                        f"{pnl_pct:+.2f}%"
-                    ))
-                    
-                except Exception as e:
-                    self.logger.error(f"Error updating position for {symbol}: {e}")
+            # Get actual positions from Alpaca
+            try:
+                alpaca_positions = self.alpaca_client.get_positions()
+                
+                for position in alpaca_positions:
+                    try:
+                        symbol = position.symbol
+                        quantity = float(position.qty)
+                        avg_price = float(position.avg_entry_price)
+                        current_price = float(position.market_value) / quantity if quantity != 0 else avg_price
+                        unrealized_pnl = float(position.unrealized_pl)
+                        unrealized_pnl_pct = float(position.unrealized_plpc) * 100
+                        
+                        # Insert into treeview
+                        self.positions_tree.insert('', 'end', values=(
+                            symbol,
+                            int(quantity),
+                            f"${avg_price:.2f}",
+                            f"${current_price:.2f}",
+                            f"${unrealized_pnl:+.2f}",
+                            f"{unrealized_pnl_pct:+.2f}%"
+                        ))
+                        
+                    except Exception as e:
+                        self.logger.error(f"Error processing position for {position.symbol}: {e}")
+                        
+            except Exception as e:
+                self.logger.error(f"Error fetching Alpaca positions: {e}")
+                # Fallback to strategy positions if Alpaca positions fail
+                if self.strategy:
+                    for symbol, trade in self.strategy.active_positions.items():
+                        try:
+                            # Get current quote
+                            quote = self.alpaca_client.get_latest_quote(symbol)
+                            current_price = quote.bid if quote else trade.entry_price
+                            
+                            # Calculate P&L
+                            pnl = (current_price - trade.entry_price) * trade.quantity
+                            pnl_pct = (current_price - trade.entry_price) / trade.entry_price * 100
+                            
+                            # Insert into treeview
+                            self.positions_tree.insert('', 'end', values=(
+                                symbol,
+                                trade.quantity,
+                                f"${trade.entry_price:.2f}",
+                                f"${current_price:.2f}",
+                                f"${pnl:+.2f}",
+                                f"{pnl_pct:+.2f}%"
+                            ))
+                            
+                        except Exception as e:
+                            self.logger.error(f"Error updating fallback position for {symbol}: {e}")
                     
         except Exception as e:
             self.logger.error(f"Error updating positions display: {e}")
@@ -723,7 +764,10 @@ class MainWindow:
             # Update strategy parameters if strategy exists
             if self.strategy:
                 for key, value in config.items():
-                    if hasattr(self.strategy, key):
+                    if key == 'aggressive_mode':
+                        # Handle aggressive mode specially
+                        self.strategy.set_aggressive_mode(value)
+                    elif hasattr(self.strategy, key):
                         setattr(self.strategy, key, value)
                         
             self.logger.info("Configuration updated")

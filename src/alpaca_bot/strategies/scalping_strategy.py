@@ -53,6 +53,10 @@ class ScalpingStrategy:
         self.stop_loss_pct = settings.stop_loss_percentage
         self.take_profit_pct = getattr(settings, 'take_profit_percentage', 0.02)
         
+        # Aggressive mode parameters
+        self.aggressive_mode = getattr(settings, 'aggressive_mode', False)
+        self._update_aggressive_parameters()
+        
         # Active positions and orders
         self.active_positions: Dict[str, Trade] = {}
         self.pending_orders: Dict[str, str] = {}  # symbol -> order_id
@@ -62,6 +66,36 @@ class ScalpingStrategy:
         self.last_update: Dict[str, datetime] = {}
         
         self.logger.info("Scalping strategy initialized")
+    
+    def _update_aggressive_parameters(self) -> None:
+        """Update strategy parameters based on aggressive mode."""
+        if self.aggressive_mode:
+            # More aggressive parameters for higher risk/reward
+            self.rsi_oversold = 35.0  # Less oversold threshold
+            self.rsi_overbought = 65.0  # Less overbought threshold
+            self.support_threshold = 0.005  # Tighter support threshold (0.5%)
+            self.resistance_threshold = 0.005  # Tighter resistance threshold (0.5%)
+            self.take_profit_pct = 0.015  # Lower take profit (1.5%)
+            self.stop_loss_pct = 0.015  # Tighter stop loss (1.5%)
+            self.logger.info("Aggressive mode enabled - using higher risk parameters")
+        else:
+            # Conservative parameters
+            self.rsi_oversold = getattr(settings, 'rsi_oversold', 30.0)
+            self.rsi_overbought = getattr(settings, 'rsi_overbought', 70.0)
+            self.support_threshold = settings.support_threshold
+            self.resistance_threshold = settings.resistance_threshold
+            self.take_profit_pct = getattr(settings, 'take_profit_percentage', 0.02)
+            self.stop_loss_pct = settings.stop_loss_percentage
+            self.logger.info("Conservative mode enabled - using standard risk parameters")
+    
+    def set_aggressive_mode(self, aggressive: bool) -> None:
+        """Set aggressive mode and update parameters.
+        
+        Args:
+            aggressive: Whether to enable aggressive mode.
+        """
+        self.aggressive_mode = aggressive
+        self._update_aggressive_parameters()
     
     def analyze_symbol(self, symbol: str, timeframe: str = '1Min', 
                       lookback_periods: int = 100) -> Optional[StockData]:
