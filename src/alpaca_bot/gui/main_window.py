@@ -316,10 +316,9 @@ class MainWindow:
                 self._update_account_info(account)
                 
                 # Check market status
-                market_status = self.alpaca_client.get_market_status()
-                if market_status:
-                    status_text = f"Market: {market_status.get('is_open', 'Unknown')}"
-                    self.market_status.config(text=status_text)
+                is_market_open = self.alpaca_client.is_market_open()
+                status_text = f"Market: {'Open' if is_market_open else 'Closed'}"
+                self.market_status.config(text=status_text)
                 
                 # Initialize strategy
                 self.strategy = ScalpingStrategy(self.alpaca_client)

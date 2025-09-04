@@ -45,13 +45,13 @@ class ScalpingStrategy:
         self.error_handler = ErrorHandler(self.logger)
         
         # Strategy parameters from settings
-        self.support_threshold = settings.SUPPORT_THRESHOLD
-        self.resistance_threshold = settings.RESISTANCE_THRESHOLD
-        self.rsi_oversold = settings.RSI_OVERSOLD
-        self.rsi_overbought = settings.RSI_OVERBOUGHT
-        self.position_size = settings.POSITION_SIZE
-        self.stop_loss_pct = settings.STOP_LOSS_PCT
-        self.take_profit_pct = settings.TAKE_PROFIT_PCT
+        self.support_threshold = settings.support_threshold
+        self.resistance_threshold = settings.resistance_threshold
+        self.rsi_oversold = getattr(settings, 'rsi_oversold', 30.0)
+        self.rsi_overbought = getattr(settings, 'rsi_overbought', 70.0)
+        self.position_size = getattr(settings, 'position_size', settings.default_position_size)
+        self.stop_loss_pct = settings.stop_loss_percentage
+        self.take_profit_pct = getattr(settings, 'take_profit_percentage', 0.02)
         
         # Active positions and orders
         self.active_positions: Dict[str, Trade] = {}
