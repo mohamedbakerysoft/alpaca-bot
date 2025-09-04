@@ -19,7 +19,7 @@ from ..models.stock import StockData, StockQuote, SupportResistanceLevel
 from ..models.trade import Trade, TradeType, OrderType, TradeStatus
 from ..services.alpaca_client import AlpacaClient
 from ..utils.technical_analysis import (
-    calculate_support_resistance,
+    identify_support_resistance_levels,
     calculate_rsi,
     calculate_bollinger_bands,
     calculate_sma
@@ -121,7 +121,7 @@ class ScalpingStrategy:
             df['bb_lower'] = bb_lower
             
             # Calculate support and resistance levels
-            support_levels, resistance_levels = calculate_support_resistance(
+            support_levels, resistance_levels = identify_support_resistance_levels(
                 df['high'].values, df['low'].values, df['close'].values
             )
             

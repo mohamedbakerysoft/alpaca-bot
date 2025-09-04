@@ -34,13 +34,13 @@ def setup_application() -> None:
         settings = Settings()
         
         # Validate required settings
-        if not settings.ALPACA_API_KEY or not settings.ALPACA_SECRET_KEY:
+        if not settings.alpaca_api_key or not settings.alpaca_secret_key:
             raise ValueError(
                 "Alpaca API credentials not found. "
                 "Please check your .env file or environment variables."
             )
         
-        logger.info(f"Configuration loaded - Trading mode: {settings.TRADING_MODE}")
+        logger.info(f"Configuration loaded - Paper trading: {settings.paper_trading}")
         
     except Exception as e:
         error_msg = f"Failed to initialize application: {e}"
@@ -69,8 +69,7 @@ def main() -> None:
         setup_application()
         
         # Create and run GUI
-        root = tk.Tk()
-        app = MainWindow(root)
+        app = MainWindow()
         
         # Configure window close behavior
         def on_closing():
@@ -81,18 +80,18 @@ def main() -> None:
                     app.stop_trading()
                 
                 # Close the application
-                root.quit()
-                root.destroy()
+                app.root.quit()
+                app.root.destroy()
                 
             except Exception as e:
                 logging.error(f"Error during application shutdown: {e}")
                 root.destroy()
         
-        root.protocol("WM_DELETE_WINDOW", on_closing)
+        app.root.protocol("WM_DELETE_WINDOW", on_closing)
         
         # Start the GUI event loop
         logging.info("Starting GUI")
-        root.mainloop()
+        app.root.mainloop()
         return True
     
     def _handle_startup_error(error: Exception):
@@ -121,9 +120,8 @@ def main() -> None:
         # Handle keyboard interrupt gracefully
         success = safe_execute(
             _run_application,
-            error_handler=error_handler,
-            operation="application startup",
-            on_error=_handle_startup_error
+            default_return=False,
+            log_errors=True
         )
         
         if not success:

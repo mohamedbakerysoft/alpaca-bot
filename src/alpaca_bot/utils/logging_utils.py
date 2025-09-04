@@ -30,7 +30,7 @@ def setup_logging(
     """
     # Get log level from settings if not provided
     if log_level is None:
-        log_level = settings.LOG_LEVEL
+        log_level = settings.log_level
     
     # Get log file path
     if log_file is None:

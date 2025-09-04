@@ -47,7 +47,7 @@ class MainWindow:
         # Create main window
         self.root = tk.Tk()
         self.root.title("Alpaca Trading Bot")
-        self.root.geometry(f"{settings.GUI_WIDTH}x{settings.GUI_HEIGHT}")
+        self.root.geometry(f"{settings.window_width}x{settings.window_height}")
         self.root.minsize(800, 600)
         
         # Configure style

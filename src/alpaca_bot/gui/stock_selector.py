@@ -12,10 +12,11 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import List, Callable, Optional, Dict, Any
 import threading
+import pandas as pd
 
 from ..services.alpaca_client import AlpacaClient
 from ..utils.logging_utils import get_logger
-from ..utils.technical_analysis import TechnicalAnalysis
+from ..utils.technical_analysis import calculate_volatility
 
 
 class StockSelectorFrame:
@@ -463,7 +464,8 @@ class StockSelectorFrame:
                             
                             if vol_bars and len(vol_bars) >= 20:
                                 closes = [bar.close for bar in vol_bars]
-                                volatility_score = TechnicalAnalysis.calculate_volatility(closes)
+                                vol_df = pd.DataFrame({'close': closes})
+                                volatility_score = calculate_volatility(vol_df)
                             
                         except Exception as e:
                             self.logger.debug(f"Could not calculate volatility for {symbol}: {e}")
