@@ -15,7 +15,7 @@ import pandas as pd
 from alpaca_trade_api.rest import REST
 
 from ..config.settings import settings
-from ..models.stock import StockData, StockQuote, SupportResistanceLevel
+from ..models.stock import StockData, StockQuote, SupportResistanceLevel, TechnicalIndicators
 from ..models.trade import Trade, TradeType, OrderType, TradeStatus
 from ..services.alpaca_client import AlpacaClient
 from ..utils.technical_analysis import (
@@ -94,21 +94,11 @@ class ScalpingStrategy:
                 limit=lookback_periods
             )
             
-            if not bars or len(bars) < 20:
+            if bars is None or len(bars) < 20:
                 raise MarketDataError(f"Insufficient data for {symbol}")
-            
-            # Convert to DataFrame for analysis
-            df = pd.DataFrame([
-                {
-                    'timestamp': bar.timestamp,
-                    'open': bar.open,
-                    'high': bar.high,
-                    'low': bar.low,
-                    'close': bar.close,
-                    'volume': bar.volume
-                }
-                for bar in bars
-            ])
+
+            # bars is already a DataFrame from get_bars method
+            df = bars
             
             # Calculate technical indicators
             df['sma_20'] = calculate_sma(df['close'], 20)
@@ -121,9 +111,7 @@ class ScalpingStrategy:
             df['bb_lower'] = bb_lower
             
             # Calculate support and resistance levels
-            support_levels, resistance_levels = identify_support_resistance_levels(
-                df['high'].values, df['low'].values, df['close'].values
-            )
+            support_levels, resistance_levels = identify_support_resistance_levels(df)
             
             # Get current quote
             quote = self.alpaca_client.get_latest_quote(symbol)
@@ -132,27 +120,29 @@ class ScalpingStrategy:
             
             current_quote = StockQuote(
                 symbol=symbol,
-                bid_price=quote.bid_price,
-                ask_price=quote.ask_price,
-                bid_size=quote.bid_size,
-                ask_size=quote.ask_size,
-                timestamp=quote.timestamp
+                bid=quote['bid'],
+                ask=quote['ask'],
+                bid_size=quote['bid_size'],
+                ask_size=quote['ask_size'],
+                timestamp=datetime.now()  # Use current time since IEX doesn't provide timestamp in the dict
             )
             
             # Create stock data object
             stock_data = StockData(
                 symbol=symbol,
+                company_name=symbol,  # Use symbol as company name for now
                 current_quote=current_quote,
                 support_levels=support_levels,
                 resistance_levels=resistance_levels,
-                technical_indicators={
-                    'rsi': df['rsi'].iloc[-1] if not df['rsi'].isna().iloc[-1] else None,
-                    'sma_20': df['sma_20'].iloc[-1] if not df['sma_20'].isna().iloc[-1] else None,
-                    'bb_upper': df['bb_upper'].iloc[-1] if not df['bb_upper'].isna().iloc[-1] else None,
-                    'bb_middle': df['bb_middle'].iloc[-1] if not df['bb_middle'].isna().iloc[-1] else None,
-                    'bb_lower': df['bb_lower'].iloc[-1] if not df['bb_lower'].isna().iloc[-1] else None,
-                },
-                price_history=df
+                technical_indicators=TechnicalIndicators(
+                    symbol=symbol,
+                    timestamp=datetime.now(),
+                    rsi=df['rsi'].iloc[-1] if not pd.isna(df['rsi'].iloc[-1]) else None,
+                    sma_20=df['sma_20'].iloc[-1] if not pd.isna(df['sma_20'].iloc[-1]) else None,
+                    bollinger_upper=df['bb_upper'].iloc[-1] if not pd.isna(df['bb_upper'].iloc[-1]) else None,
+                    bollinger_middle=df['bb_middle'].iloc[-1] if not pd.isna(df['bb_middle'].iloc[-1]) else None,
+                    bollinger_lower=df['bb_lower'].iloc[-1] if not pd.isna(df['bb_lower'].iloc[-1]) else None,
+                )
             )
             
             # Update cache
@@ -178,7 +168,7 @@ class ScalpingStrategy:
         """
         signals = []
         symbol = stock_data.symbol
-        current_price = stock_data.current_quote.ask_price
+        current_price = stock_data.current_quote.ask
         
         # Skip if already have position or pending order
         if symbol in self.active_positions or symbol in self.pending_orders:
@@ -270,7 +260,7 @@ class ScalpingStrategy:
             
             buying_power = float(account.buying_power)
             max_position_value = buying_power * self.position_size
-            quantity = int(max_position_value / quote.ask_price)
+            quantity = int(max_position_value / quote.ask)
             
             if quantity <= 0:
                 raise OrderExecutionError(f"Insufficient buying power for {symbol}")
@@ -292,7 +282,7 @@ class ScalpingStrategy:
                 symbol=symbol,
                 trade_type=TradeType.BUY,
                 quantity=quantity,
-                entry_price=quote.ask_price,
+                entry_price=quote.ask,
                 timestamp=datetime.now(),
                 order_id=order.id,
                 status=TradeStatus.PENDING,
@@ -346,7 +336,7 @@ class ScalpingStrategy:
             
             # Get current quote for exit price
             quote = self.alpaca_client.get_latest_quote(symbol)
-            exit_price = quote.bid_price if quote else position_trade.entry_price
+            exit_price = quote.bid if quote else position_trade.entry_price
             
             # Create sell trade object
             trade = Trade(
@@ -395,7 +385,7 @@ class ScalpingStrategy:
         if not stock_data:
             return None
         
-        current_price = stock_data.current_quote.bid_price
+        current_price = stock_data.current_quote.bid
         entry_price = position.entry_price
         
         # Calculate profit/loss percentage
@@ -593,7 +583,7 @@ class ScalpingStrategy:
             if not quote:
                 raise MarketDataError(f"Could not get quote for P&L calculation: {symbol}")
             
-            current_price = quote.bid_price
+            current_price = quote.bid
             return (current_price - trade.entry_price) * trade.quantity
         
         return safe_execute(

@@ -633,7 +633,7 @@ class MainWindow:
                 try:
                     # Get current quote
                     quote = self.alpaca_client.get_latest_quote(symbol)
-                    current_price = quote.bid_price if quote else trade.entry_price
+                    current_price = quote.bid if quote else trade.entry_price
                     
                     # Calculate P&L
                     pnl = (current_price - trade.entry_price) * trade.quantity

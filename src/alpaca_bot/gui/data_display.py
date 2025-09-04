@@ -351,10 +351,10 @@ class DataDisplay:
                 self.price_change_label.config(text=change_text, foreground=change_color)
             
             # Update bid/ask
-            if quote.bid_price:
-                self.bid_label.config(text=f"${quote.bid_price:.2f}")
-            if quote.ask_price:
-                self.ask_label.config(text=f"${quote.ask_price:.2f}")
+            if quote.bid:
+                self.bid_label.config(text=f"${quote.bid:.2f}")
+            if quote.ask:
+                self.ask_label.config(text=f"${quote.ask:.2f}")
             
             # Update volume
             if quote.volume:

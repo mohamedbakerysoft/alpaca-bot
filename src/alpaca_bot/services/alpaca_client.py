@@ -316,30 +316,70 @@ class AlpacaClient:
             if end is None:
                 end = datetime.now()
             
+            # Ensure start and end are datetime objects, not strings
+            if isinstance(start, str):
+                start = datetime.fromisoformat(start.replace('Z', '+00:00'))
+            if isinstance(end, str):
+                end = datetime.fromisoformat(end.replace('Z', '+00:00'))
+            
             # Get bars from Alpaca
-            # Format datetime to RFC3339 without microseconds
+            # Format datetime to RFC3339 without microseconds for Alpaca API
             start_str = start.strftime('%Y-%m-%dT%H:%M:%SZ')
             end_str = end.strftime('%Y-%m-%dT%H:%M:%SZ')
             
+            # Use IEX feed for free accounts to avoid SIP data subscription issues
+            # IEX provides delayed data (15-minute delay) which is acceptable for development
             bars = self.api.get_bars(
                 symbol,
                 timeframe,
                 start=start_str,
                 end=end_str,
                 limit=limit,
+                feed='iex'  # Use IEX feed instead of SIP to avoid subscription limitations
             )
+            
+            # Log that we're using delayed data
+            self.logger.info(f"Retrieved {symbol} market data using IEX feed (15-minute delayed data)")
             
             # Convert to DataFrame
             data = []
             for bar in bars:
-                data.append({
-                    'timestamp': bar.t,
-                    'open': bar.o,
-                    'high': bar.h,
-                    'low': bar.l,
-                    'close': bar.c,
-                    'volume': bar.v,
-                })
+                # Handle different bar formats from IEX feed
+                if hasattr(bar, 't'):
+                    # Standard Alpaca bar format
+                    data.append({
+                        'timestamp': bar.t,
+                        'open': bar.o,
+                        'high': bar.h,
+                        'low': bar.l,
+                        'close': bar.c,
+                        'volume': bar.v,
+                    })
+                elif hasattr(bar, 'timestamp'):
+                    # Alternative bar format
+                    data.append({
+                        'timestamp': bar.timestamp,
+                        'open': bar.open,
+                        'high': bar.high,
+                        'low': bar.low,
+                        'close': bar.close,
+                        'volume': bar.volume,
+                    })
+                else:
+                    # If bar is a dict or other format
+                    self.logger.warning(f"Unexpected bar format: {type(bar)}, {bar}")
+                    if isinstance(bar, dict):
+                        data.append({
+                            'timestamp': bar.get('t') or bar.get('timestamp'),
+                            'open': bar.get('o') or bar.get('open'),
+                            'high': bar.get('h') or bar.get('high'),
+                            'low': bar.get('l') or bar.get('low'),
+                            'close': bar.get('c') or bar.get('close'),
+                            'volume': bar.get('v') or bar.get('volume'),
+                        })
+                    else:
+                        self.logger.error(f"Cannot process bar of type {type(bar)}: {bar}")
+                        continue
             
             df = pd.DataFrame(data)
             if not df.empty:
@@ -370,12 +410,31 @@ class AlpacaClient:
             if self.error_handler.is_circuit_breaker_open(f"get_quote_{symbol}"):
                 raise APIConnectionError(f"Circuit breaker is open for {symbol} quotes")
             
-            quote = self.api.get_latest_quote(symbol)
+            # Use IEX feed for free accounts to avoid SIP data subscription issues
+            quote = self.api.get_latest_quote(symbol, feed='iex')
+            
+            # Log that we're using delayed data
+            self.logger.info(f"Retrieved {symbol} quote using IEX feed (15-minute delayed data)")
+            
+            # Handle IEX quote object structure
+            # IEX quotes may have different attribute names or structure
+            try:
+                bid_price = getattr(quote, 'bid_price', getattr(quote, 'bid', 0.0))
+                ask_price = getattr(quote, 'ask_price', getattr(quote, 'ask', 0.0))
+                bid_size = getattr(quote, 'bid_size', 0)
+                ask_size = getattr(quote, 'ask_size', 0)
+            except AttributeError:
+                # Fallback: use the last trade price as both bid and ask
+                trade = self.api.get_latest_trade(symbol, feed='iex')
+                bid_price = ask_price = float(trade.price)
+                bid_size = ask_size = 0
+                self.logger.warning(f"Quote attributes not available for {symbol}, using trade price")
+            
             return {
-                'bid': float(quote.bid_price),
-                'ask': float(quote.ask_price),
-                'bid_size': int(quote.bid_size),
-                'ask_size': int(quote.ask_size),
+                'bid': float(bid_price),
+                'ask': float(ask_price),
+                'bid_size': int(bid_size),
+                'ask_size': int(ask_size),
             }
         except Exception as e:
             self.error_handler.handle_market_data_error(e, symbol)
@@ -399,7 +458,12 @@ class AlpacaClient:
             if self.error_handler.is_circuit_breaker_open(f"get_trade_{symbol}"):
                 raise APIConnectionError(f"Circuit breaker is open for {symbol} trade data")
             
-            trade = self.api.get_latest_trade(symbol)
+            # Use IEX feed for free accounts to avoid SIP data subscription issues
+            trade = self.api.get_latest_trade(symbol, feed='iex')
+            
+            # Log that we're using delayed data
+            self.logger.info(f"Retrieved {symbol} trade data using IEX feed (15-minute delayed data)")
+            
             return {
                 'price': float(trade.price),
                 'size': int(trade.size),

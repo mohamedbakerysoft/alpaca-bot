@@ -432,7 +432,7 @@ class StockSelectorFrame:
                     if not quote:
                         continue
                     
-                    price = quote.bid_price
+                    price = quote.bid
                     if price < min_price or price > max_price:
                         continue
                     
