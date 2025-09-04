@@ -262,8 +262,9 @@ class ScalpingStrategy:
                 raise OrderExecutionError("Could not get account information")
             
             buying_power = float(account.buying_power)
-            max_position_value = buying_power * self.position_size
-            quantity = int(max_position_value / quote.ask)
+            # Use position_size as a fixed dollar amount, not a multiplier
+            max_position_value = min(self.position_size, buying_power * 0.95)  # Use 95% of buying power as max
+            quantity = int(max_position_value / quote['ask'])
             
             if quantity <= 0:
                 raise OrderExecutionError(f"Insufficient buying power for {symbol}")
@@ -273,7 +274,7 @@ class ScalpingStrategy:
                 symbol=symbol,
                 qty=quantity,
                 side='buy',
-                type='market',
+                order_type='market',
                 time_in_force='day'
             )
             
@@ -285,7 +286,7 @@ class ScalpingStrategy:
                 symbol=symbol,
                 trade_type=TradeType.BUY,
                 quantity=quantity,
-                entry_price=quote.ask,
+                entry_price=quote['ask'],
                 timestamp=datetime.now(),
                 order_id=order.id,
                 status=TradeStatus.PENDING,
@@ -330,7 +331,7 @@ class ScalpingStrategy:
                 symbol=symbol,
                 qty=position_trade.quantity,
                 side='sell',
-                type='market',
+                order_type='market',
                 time_in_force='day'
             )
             
@@ -339,7 +340,7 @@ class ScalpingStrategy:
             
             # Get current quote for exit price
             quote = self.alpaca_client.get_latest_quote(symbol)
-            exit_price = quote.bid if quote else position_trade.entry_price
+            exit_price = quote['bid'] if quote else position_trade.entry_price
             
             # Create sell trade object
             trade = Trade(
@@ -589,7 +590,7 @@ class ScalpingStrategy:
             if not quote:
                 raise MarketDataError(f"Could not get quote for P&L calculation: {symbol}")
             
-            current_price = quote.bid
+            current_price = quote['bid']
             return (current_price - trade.entry_price) * trade.quantity
         
         return safe_execute(
