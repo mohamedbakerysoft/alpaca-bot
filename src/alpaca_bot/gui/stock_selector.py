@@ -96,6 +96,9 @@ class StockSelectorFrame:
         # Selected symbols display
         self._create_symbols_display()
         
+        # Set popular stocks as selected by default after all widgets are created
+        self._update_manual_selection()
+        
         # Initially show manual mode
         self._on_mode_changed()
     
@@ -113,7 +116,8 @@ class StockSelectorFrame:
             row = i // 5
             col = i % 5
             
-            var = tk.BooleanVar()
+            # Set popular stocks as selected by default
+            var = tk.BooleanVar(value=True)
             self.popular_vars[symbol] = var
             
             cb = ttk.Checkbutton(

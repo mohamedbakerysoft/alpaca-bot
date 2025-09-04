@@ -178,6 +178,29 @@ class AlpacaClient:
             self.error_handler.handle_api_error(e, "get_orders")
             raise
     
+    @retry_on_error(max_retries=3, delay=1.0)
+    @circuit_breaker(failure_threshold=5, timeout=300)
+    def get_order(self, order_id: str) -> Optional[Order]:
+        """Get a specific order by ID.
+        
+        Args:
+            order_id: ID of the order to retrieve.
+            
+        Returns:
+            Optional[Order]: Order if found, None otherwise.
+            
+        Raises:
+            AlpacaClientError: If API call fails.
+        """
+        try:
+            if self.error_handler.is_circuit_breaker_open("get_order"):
+                raise APIConnectionError("Circuit breaker is open for order operations")
+            
+            return self.api.get_order_by_id(order_id)
+        except Exception as e:
+            self.error_handler.handle_api_error(e, "get_order")
+            raise
+    
     @retry_on_error(max_retries=2, delay=0.5)  # Fewer retries for orders to avoid duplicates
     def place_order(
         self,

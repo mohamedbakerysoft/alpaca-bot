@@ -286,11 +286,11 @@ class ScalpingStrategy:
                 symbol=symbol,
                 trade_type=TradeType.BUY,
                 quantity=quantity,
-                entry_price=quote['ask'],
+                price=quote['ask'],
                 timestamp=datetime.now(),
                 order_id=order.id,
                 status=TradeStatus.PENDING,
-                strategy_reason=reason
+                notes=reason
             )
             
             # Track the order
@@ -340,19 +340,18 @@ class ScalpingStrategy:
             
             # Get current quote for exit price
             quote = self.alpaca_client.get_latest_quote(symbol)
-            exit_price = quote['bid'] if quote else position_trade.entry_price
+            exit_price = quote['bid'] if quote else position_trade.price
             
             # Create sell trade object
             trade = Trade(
                 symbol=symbol,
                 trade_type=TradeType.SELL,
                 quantity=position_trade.quantity,
-                entry_price=position_trade.entry_price,
-                exit_price=exit_price,
+                price=exit_price,
                 timestamp=datetime.now(),
                 order_id=order.id,
                 status=TradeStatus.PENDING,
-                strategy_reason=reason
+                notes=reason
             )
             
             # Track the order
@@ -390,7 +389,7 @@ class ScalpingStrategy:
             return None
         
         current_price = stock_data.current_quote.bid
-        entry_price = position.entry_price
+        entry_price = position.price
         
         # Calculate profit/loss percentage
         pnl_pct = (current_price - entry_price) / entry_price
@@ -475,7 +474,7 @@ class ScalpingStrategy:
                     symbol=symbol,
                     trade_type=TradeType.BUY,
                     quantity=quantity,
-                    entry_price=fill_price,
+                    price=fill_price,
                     timestamp=datetime.now(),
                     order_id=order.id,
                     status=TradeStatus.FILLED
@@ -488,10 +487,10 @@ class ScalpingStrategy:
                 # Close existing position
                 if symbol in self.active_positions:
                     position = self.active_positions[symbol]
-                    pnl = (fill_price - position.entry_price) * quantity
+                    pnl = (fill_price - position.price) * quantity
                     
                     trade_logger.log_position_closed(
-                        symbol, quantity, position.entry_price, fill_price, pnl
+                        symbol, quantity, position.price, fill_price, pnl
                     )
                     
                     del self.active_positions[symbol]
@@ -561,7 +560,7 @@ class ScalpingStrategy:
             'pending_orders': len(self.pending_orders),
             'positions': {symbol: {
                 'quantity': trade.quantity,
-                'entry_price': trade.entry_price,
+                'entry_price': trade.price,
                 'current_pnl': self._calculate_position_pnl(symbol, trade)
             } for symbol, trade in self.active_positions.items()},
             'strategy_parameters': {
@@ -591,7 +590,7 @@ class ScalpingStrategy:
                 raise MarketDataError(f"Could not get quote for P&L calculation: {symbol}")
             
             current_price = quote['bid']
-            return (current_price - trade.entry_price) * trade.quantity
+            return (current_price - trade.price) * trade.quantity
         
         return safe_execute(
             _calculate_pnl,
