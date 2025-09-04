@@ -145,7 +145,15 @@ class ScalpingStrategy:
             df['bollinger_lower'] = bb_lower
             
             # Calculate support and resistance levels
-            support_levels, resistance_levels = identify_support_resistance_levels(df)
+            self.logger.info(f"{symbol}: DataFrame shape for S/R calculation: {df.shape}")
+            self.logger.info(f"{symbol}: DataFrame columns: {df.columns.tolist()}")
+            self.logger.info(f"{symbol}: Price range: ${df['low'].min():.2f} - ${df['high'].max():.2f}")
+            
+            support_levels, resistance_levels = identify_support_resistance_levels(
+                df, window=10, min_touches=1, tolerance_percent=1.0
+            )
+            
+            self.logger.info(f"{symbol}: Found {len(support_levels)} support levels, {len(resistance_levels)} resistance levels")
             
             # Get current quote
             quote = self.alpaca_client.get_latest_quote(symbol)
@@ -206,10 +214,12 @@ class ScalpingStrategy:
         
         # Skip if already have position or pending order
         if symbol in self.active_positions or symbol in self.pending_orders:
+            self.logger.debug(f"{symbol}: Skipping - already have position or pending order")
             return signals
         
         # Get technical indicators
         if stock_data.technical_indicators is None:
+            self.logger.debug(f"{symbol}: No technical indicators available")
             return signals
         
         rsi = stock_data.technical_indicators.rsi
@@ -220,22 +230,41 @@ class ScalpingStrategy:
         nearest_support = self._find_nearest_support(stock_data, current_price)
         nearest_resistance = self._find_nearest_resistance(stock_data, current_price)
         
+        # Debug logging
+        rsi_str = f"{rsi:.1f}" if rsi else "N/A"
+        bb_lower_str = f"${bb_lower:.2f}" if bb_lower else "N/A"
+        support_str = f"${nearest_support.price:.2f}" if nearest_support else "N/A"
+        resistance_str = f"${nearest_resistance.price:.2f}" if nearest_resistance else "N/A"
+        
+        self.logger.info(f"{symbol}: Price=${current_price:.2f}, RSI={rsi_str}, "
+                        f"BB_Lower={bb_lower_str}, Support={support_str}, Resistance={resistance_str}")
+        
         # Buy signal conditions
         buy_conditions = []
         
         # Condition 1: Price near support level
         if nearest_support:
             distance_to_support = abs(current_price - nearest_support.price) / current_price
+            self.logger.debug(f"{symbol}: Distance to support: {distance_to_support:.4f} (threshold: {self.support_threshold})")
             if distance_to_support <= self.support_threshold:
                 buy_conditions.append(f"Near support at ${nearest_support.price:.2f}")
+        else:
+            self.logger.debug(f"{symbol}: No support levels found")
         
         # Condition 2: RSI oversold
         if rsi and rsi <= self.rsi_oversold:
             buy_conditions.append(f"RSI oversold ({rsi:.1f})")
+        elif rsi:
+            self.logger.debug(f"{symbol}: RSI not oversold: {rsi:.1f} > {self.rsi_oversold}")
         
         # Condition 3: Price near lower Bollinger Band
         if bb_lower and current_price <= bb_lower * 1.01:  # Within 1% of lower band
             buy_conditions.append(f"Near lower Bollinger Band (${bb_lower:.2f})")
+        elif bb_lower:
+            self.logger.debug(f"{symbol}: Price not near BB lower: ${current_price:.2f} > ${bb_lower * 1.01:.2f}")
+        
+        # Log conditions found
+        self.logger.info(f"{symbol}: Buy conditions met: {len(buy_conditions)}/3 - {buy_conditions}")
         
         # Generate buy signal if conditions met
         if len(buy_conditions) >= 2:  # Require at least 2 conditions

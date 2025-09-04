@@ -194,7 +194,13 @@ def identify_support_resistance_levels(
         Tuple[List[SupportResistanceLevel], List[SupportResistanceLevel]]: 
         Support levels and resistance levels.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"S/R Analysis: DataFrame length={len(df)}, window={window}, min_touches={min_touches}")
+    
     if df.empty or len(df) < window * 2:
+        logger.info(f"S/R Analysis: Insufficient data - empty={df.empty}, len={len(df)}, required={window * 2}")
         return [], []
     
     try:
@@ -223,6 +229,9 @@ def identify_support_resistance_levels(
         resistance_levels = _group_price_levels(
             resistance_candidates, tolerance_percent, 'resistance', min_touches
         )
+        
+        logger.info(f"S/R Analysis: Found {len(support_candidates)} support candidates, {len(resistance_candidates)} resistance candidates")
+        logger.info(f"S/R Analysis: Final results - {len(support_levels)} support levels, {len(resistance_levels)} resistance levels")
         
         return support_levels, resistance_levels
         
