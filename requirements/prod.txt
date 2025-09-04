@@ -1,0 +1,13 @@
+# Production dependencies for Alpaca Trading Bot
+
+# Include base requirements
+-r base.txt
+
+# Production monitoring and logging
+psutil==5.9.6
+
+# Security
+cryptography==41.0.7
+
+# Performance monitoring
+memory-profiler==0.61.0

@@ -1,0 +1,845 @@
+"""Main GUI window for the Alpaca trading bot.
+
+This module provides the main interface with:
+- Start/Stop button to control automated trading
+- Dropdown menu to manually select specific stocks
+- Auto-selection option for optimal scalping stocks
+- Real-time display of trading status and performance
+"""
+
+import logging
+import threading
+import tkinter as tk
+from tkinter import ttk, messagebox, scrolledtext
+from datetime import datetime
+from typing import Dict, List, Optional
+
+from ..config.settings import settings
+from ..services.alpaca_client import AlpacaClient
+from ..strategies.scalping_strategy import ScalpingStrategy
+from ..utils.logging_utils import get_logger, setup_logging
+from ..utils.error_handler import (
+    ErrorHandler, TradingBotError, APIConnectionError, 
+    MarketDataError, OrderExecutionError, ConfigurationError,
+    RateLimitError, safe_execute
+)
+from .stock_selector import StockSelectorFrame
+from .trading_panel import TradingPanel
+from .performance_display import PerformanceDisplay
+from .config_panel import ConfigPanel
+
+
+class MainWindow:
+    """Main application window."""
+    
+    def __init__(self):
+        """Initialize the main window."""
+        self.logger = get_logger(__name__)
+        self.error_handler = ErrorHandler(self.logger)
+        
+        # Initialize components
+        self.alpaca_client: Optional[AlpacaClient] = None
+        self.strategy: Optional[ScalpingStrategy] = None
+        self.trading_thread: Optional[threading.Thread] = None
+        self.is_trading = False
+        self.selected_symbols: List[str] = []
+        
+        # Create main window
+        self.root = tk.Tk()
+        self.root.title("Alpaca Trading Bot")
+        self.root.geometry(f"{settings.GUI_WIDTH}x{settings.GUI_HEIGHT}")
+        self.root.minsize(800, 600)
+        
+        # Configure style
+        self.style = ttk.Style()
+        self.style.theme_use('clam')
+        
+        # Create GUI components
+        self._create_menu()
+        self._create_main_frame()
+        self._create_status_bar()
+        
+        # Initialize API client
+        self._initialize_api_client()
+        
+        # Bind window close event
+        self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
+        
+        self.logger.info("Main window initialized")
+    
+    def _create_menu(self) -> None:
+        """Create the application menu bar."""
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+        
+        # File menu
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="Settings", command=self._show_settings)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self._on_closing)
+        
+        # Trading menu
+        trading_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Trading", menu=trading_menu)
+        trading_menu.add_command(label="Start Trading", command=self._start_trading)
+        trading_menu.add_command(label="Stop Trading", command=self._stop_trading)
+        trading_menu.add_separator()
+        trading_menu.add_command(label="View Positions", command=self._show_positions)
+        trading_menu.add_command(label="View Orders", command=self._show_orders)
+        
+        # View menu
+        view_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="View", menu=view_menu)
+        view_menu.add_command(label="Trading Log", command=self._show_trading_log)
+        view_menu.add_command(label="Performance", command=self._show_performance)
+        
+        # Help menu
+        help_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="About", command=self._show_about)
+    
+    def _create_main_frame(self) -> None:
+        """Create the main application frame."""
+        # Create main container with paned window
+        main_paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
+        main_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Left panel for controls
+        left_frame = ttk.Frame(main_paned)
+        main_paned.add(left_frame, weight=1)
+        
+        # Right panel for displays
+        right_frame = ttk.Frame(main_paned)
+        main_paned.add(right_frame, weight=2)
+        
+        # Create left panel components
+        self._create_control_panel(left_frame)
+        
+        # Create right panel components
+        self._create_display_panel(right_frame)
+    
+    def _create_control_panel(self, parent: ttk.Frame) -> None:
+        """Create the control panel.
+        
+        Args:
+            parent: Parent frame.
+        """
+        # Trading control section
+        control_frame = ttk.LabelFrame(parent, text="Trading Control", padding=10)
+        control_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Start/Stop button
+        self.start_stop_btn = ttk.Button(
+            control_frame,
+            text="Start Trading",
+            command=self._toggle_trading,
+            style="Accent.TButton"
+        )
+        self.start_stop_btn.pack(fill=tk.X, pady=(0, 10))
+        
+        # Trading status
+        self.status_var = tk.StringVar(value="Stopped")
+        status_label = ttk.Label(control_frame, text="Status:")
+        status_label.pack(anchor=tk.W)
+        
+        self.status_display = ttk.Label(
+            control_frame,
+            textvariable=self.status_var,
+            font=('TkDefaultFont', 10, 'bold')
+        )
+        self.status_display.pack(anchor=tk.W, pady=(0, 10))
+        
+        # Account info
+        account_frame = ttk.LabelFrame(parent, text="Account Info", padding=10)
+        account_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        self.account_info = ttk.Label(account_frame, text="Not connected")
+        self.account_info.pack(anchor=tk.W)
+        
+        # Stock selection
+        self.stock_selector = StockSelectorFrame(parent, self._on_symbols_changed)
+        
+        # Trading panel
+        self.trading_panel = TradingPanel(parent)
+        
+        # Configuration panel
+        self.config_panel = ConfigPanel(parent, self._on_config_changed)
+    
+    def _create_display_panel(self, parent: ttk.Frame) -> None:
+        """Create the display panel.
+        
+        Args:
+            parent: Parent frame.
+        """
+        # Create notebook for tabbed display
+        notebook = ttk.Notebook(parent)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Performance tab
+        perf_frame = ttk.Frame(notebook)
+        notebook.add(perf_frame, text="Performance")
+        self.performance_display = PerformanceDisplay(perf_frame)
+        
+        # Log tab
+        log_frame = ttk.Frame(notebook)
+        notebook.add(log_frame, text="Trading Log")
+        self._create_log_display(log_frame)
+        
+        # Positions tab
+        positions_frame = ttk.Frame(notebook)
+        notebook.add(positions_frame, text="Positions")
+        self._create_positions_display(positions_frame)
+        
+        # Orders tab
+        orders_frame = ttk.Frame(notebook)
+        notebook.add(orders_frame, text="Orders")
+        self._create_orders_display(orders_frame)
+    
+    def _create_log_display(self, parent: ttk.Frame) -> None:
+        """Create the log display.
+        
+        Args:
+            parent: Parent frame.
+        """
+        # Log text area
+        self.log_text = scrolledtext.ScrolledText(
+            parent,
+            wrap=tk.WORD,
+            height=20,
+            font=('Consolas', 9)
+        )
+        self.log_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Log controls
+        log_controls = ttk.Frame(parent)
+        log_controls.pack(fill=tk.X, padx=5, pady=5)
+        
+        ttk.Button(
+            log_controls,
+            text="Clear Log",
+            command=self._clear_log
+        ).pack(side=tk.LEFT, padx=(0, 5))
+        
+        ttk.Button(
+            log_controls,
+            text="Refresh",
+            command=self._refresh_log
+        ).pack(side=tk.LEFT)
+    
+    def _create_positions_display(self, parent: ttk.Frame) -> None:
+        """Create the positions display.
+        
+        Args:
+            parent: Parent frame.
+        """
+        # Positions treeview
+        columns = ('Symbol', 'Quantity', 'Entry Price', 'Current Price', 'P&L', 'P&L %')
+        self.positions_tree = ttk.Treeview(parent, columns=columns, show='headings')
+        
+        for col in columns:
+            self.positions_tree.heading(col, text=col)
+            self.positions_tree.column(col, width=100, anchor=tk.CENTER)
+        
+        # Scrollbar for positions
+        pos_scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=self.positions_tree.yview)
+        self.positions_tree.configure(yscrollcommand=pos_scrollbar.set)
+        
+        self.positions_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        pos_scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
+    
+    def _create_orders_display(self, parent: ttk.Frame) -> None:
+        """Create the orders display.
+        
+        Args:
+            parent: Parent frame.
+        """
+        # Orders treeview
+        columns = ('Order ID', 'Symbol', 'Side', 'Quantity', 'Type', 'Status', 'Time')
+        self.orders_tree = ttk.Treeview(parent, columns=columns, show='headings')
+        
+        for col in columns:
+            self.orders_tree.heading(col, text=col)
+            self.orders_tree.column(col, width=100, anchor=tk.CENTER)
+        
+        # Scrollbar for orders
+        orders_scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=self.orders_tree.yview)
+        self.orders_tree.configure(yscrollcommand=orders_scrollbar.set)
+        
+        self.orders_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        orders_scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
+    
+    def _create_status_bar(self) -> None:
+        """Create the status bar."""
+        self.status_bar = ttk.Frame(self.root)
+        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # Connection status
+        self.connection_status = ttk.Label(
+            self.status_bar,
+            text="Disconnected",
+            relief=tk.SUNKEN,
+            anchor=tk.W
+        )
+        self.connection_status.pack(side=tk.LEFT, padx=5, pady=2)
+        
+        # Market status
+        self.market_status = ttk.Label(
+            self.status_bar,
+            text="Market: Unknown",
+            relief=tk.SUNKEN,
+            anchor=tk.W
+        )
+        self.market_status.pack(side=tk.LEFT, padx=5, pady=2)
+        
+        # Time display
+        self.time_display = ttk.Label(
+            self.status_bar,
+            text="",
+            relief=tk.SUNKEN,
+            anchor=tk.E
+        )
+        self.time_display.pack(side=tk.RIGHT, padx=5, pady=2)
+        
+        # Update time display
+        self._update_time_display()
+    
+    def _initialize_api_client(self) -> None:
+        """Initialize the Alpaca API client."""
+        def _init_client():
+            self.alpaca_client = AlpacaClient()
+            
+            # Test connection
+            account = self.alpaca_client.get_account()
+            if account:
+                self.connection_status.config(text="Connected")
+                self._update_account_info(account)
+                
+                # Check market status
+                market_status = self.alpaca_client.get_market_status()
+                if market_status:
+                    status_text = f"Market: {market_status.get('is_open', 'Unknown')}"
+                    self.market_status.config(text=status_text)
+                
+                # Initialize strategy
+                self.strategy = ScalpingStrategy(self.alpaca_client)
+                
+                self.logger.info("API client initialized successfully")
+                return True
+            else:
+                self.connection_status.config(text="Connection Failed")
+                messagebox.showerror(
+                    "Connection Error",
+                    "Failed to connect to Alpaca API. Please check your credentials."
+                )
+                return False
+        
+        success = safe_execute(
+            _init_client,
+            error_handler=self.error_handler,
+            operation="API client initialization",
+            on_error=lambda e: self._handle_connection_error(e)
+        )
+        
+        if not success:
+            self.connection_status.config(text="Connection Error")
+    
+    def _handle_connection_error(self, error: Exception) -> None:
+        """Handle API connection errors with user-friendly messages.
+        
+        Args:
+            error: The exception that occurred.
+        """
+        if isinstance(error, ConfigurationError):
+            messagebox.showerror(
+                "Configuration Error",
+                "Invalid API credentials. Please check your API key and secret."
+            )
+        elif isinstance(error, APIConnectionError):
+            messagebox.showerror(
+                "Connection Error",
+                "Failed to connect to Alpaca API. Please check your internet connection."
+            )
+        elif isinstance(error, RateLimitError):
+            messagebox.showwarning(
+                "Rate Limit",
+                "API rate limit exceeded. Please wait before retrying."
+            )
+        else:
+            messagebox.showerror(
+                "Initialization Error",
+                f"Failed to initialize API client: {error}"
+            )
+     
+    def _update_account_info(self, account) -> None:
+        """Update account information display.
+        
+        Args:
+            account: Account object from Alpaca API.
+        """
+        try:
+            buying_power = float(account.buying_power)
+            portfolio_value = float(account.portfolio_value)
+            
+            info_text = (
+                f"Buying Power: ${buying_power:,.2f}\n"
+                f"Portfolio Value: ${portfolio_value:,.2f}"
+            )
+            
+            self.account_info.config(text=info_text)
+            
+        except Exception as e:
+            self.logger.error(f"Error updating account info: {e}")
+            self.account_info.config(text="Error loading account info")
+    
+    def _toggle_trading(self) -> None:
+        """Toggle trading on/off."""
+        if self.is_trading:
+            self._stop_trading()
+        else:
+            self._start_trading()
+    
+    def _start_trading(self) -> None:
+        """Start automated trading."""
+        def _start_trading_internal() -> None:
+            """Internal function to start trading."""
+            if not self.alpaca_client or not self.strategy:
+                messagebox.showerror(
+                    "Error",
+                    "API client not initialized. Please check your connection."
+                )
+                return
+            
+            if not self.selected_symbols:
+                messagebox.showwarning(
+                    "Warning",
+                    "No symbols selected. Please select stocks to trade."
+                )
+                return
+            
+            # Confirm start trading
+            if not messagebox.askyesno(
+                "Confirm",
+                f"Start trading with {len(self.selected_symbols)} symbols?\n"
+                f"Symbols: {', '.join(self.selected_symbols)}"
+            ):
+                return
+            
+            self.is_trading = True
+            self.status_var.set("Running")
+            self.start_stop_btn.config(text="Stop Trading", style="Danger.TButton")
+            
+            # Start trading thread
+            self.trading_thread = threading.Thread(
+                target=self._trading_loop,
+                daemon=True
+            )
+            self.trading_thread.start()
+            
+            self.logger.info("Trading started")
+            self._log_message("Trading started")
+        
+        def _handle_start_error(error: Exception) -> None:
+            """Handle trading start errors."""
+            self.logger.error(f"Error starting trading: {error}")
+            messagebox.showerror("Error", f"Failed to start trading: {error}")
+        
+        safe_execute(
+            _start_trading_internal,
+            self.error_handler,
+            error_handler=_handle_start_error
+        )
+    
+    def _stop_trading(self) -> None:
+        """Stop automated trading."""
+        def _stop_trading_internal():
+            self.is_trading = False
+            self.status_var.set("Stopping...")
+            
+            # Wait for trading thread to finish
+            if self.trading_thread and self.trading_thread.is_alive():
+                self.trading_thread.join(timeout=5)
+            
+            self.status_var.set("Stopped")
+            self.start_stop_btn.config(text="Start Trading", style="Accent.TButton")
+            
+            self.logger.info("Trading stopped")
+            self._log_message("Trading stopped")
+            return True
+        
+        safe_execute(
+            _stop_trading_internal,
+            error_handler=self.error_handler,
+            operation="stop trading",
+            on_error=lambda e: messagebox.showerror("Error", f"Failed to stop trading: {e}")
+        )
+    
+    def _trading_loop(self) -> None:
+        """Main trading loop."""
+        def _run_trading_loop() -> None:
+            """Internal function to run the trading loop."""
+            while self.is_trading:
+                # Update strategy positions
+                if self.strategy:
+                    safe_execute(
+                        self.strategy.update_positions,
+                        error_handler=self.error_handler,
+                        operation="update positions"
+                    )
+                
+                # Analyze each selected symbol
+                for symbol in self.selected_symbols:
+                    if not self.is_trading:
+                        break
+                    
+                    def _process_symbol():
+                        # Analyze symbol
+                        stock_data = self.strategy.analyze_symbol(symbol)
+                        if not stock_data:
+                            return
+                        
+                        # Generate signals
+                        signals = self.strategy.generate_signals(stock_data)
+                        
+                        # Execute trades based on signals
+                        for signal_type, reason in signals:
+                            if not self.is_trading:
+                                break
+                            
+                            trade = self.strategy.execute_trade(symbol, signal_type, reason)
+                            if trade:
+                                self._log_message(
+                                    f"{signal_type} signal executed for {symbol}: {reason}"
+                                )
+                        
+                        # Update displays
+                        self.root.after(0, self._update_displays)
+                    
+                    safe_execute(
+                        _process_symbol,
+                        error_handler=self.error_handler,
+                        operation=f"process symbol {symbol}",
+                        on_error=lambda e: self._handle_trading_error(symbol, e)
+                    )
+                
+                # Sleep between iterations
+                if self.is_trading:
+                    threading.Event().wait(5)  # 5-second interval
+        
+        def _handle_loop_error(error: Exception) -> None:
+            """Handle trading loop errors."""
+            self.logger.error(f"Error in trading loop: {error}")
+            self.root.after(0, lambda: self._handle_critical_trading_error(error))
+        
+        def _cleanup() -> None:
+            """Cleanup after trading loop."""
+            self.root.after(0, lambda: self.status_var.set("Stopped"))
+        
+        try:
+            safe_execute(
+                _run_trading_loop,
+                self.error_handler,
+                error_handler=_handle_loop_error
+            )
+        finally:
+            _cleanup()
+    
+    def _handle_trading_error(self, symbol: str, error: Exception) -> None:
+        """Handle trading errors for specific symbols.
+        
+        Args:
+            symbol: Stock symbol that caused the error.
+            error: The exception that occurred.
+        """
+        if isinstance(error, MarketDataError):
+            self._log_message(f"Market data unavailable for {symbol}")
+        elif isinstance(error, OrderExecutionError):
+            self._log_message(f"Order execution failed for {symbol}: {error}")
+            messagebox.showwarning(
+                "Order Failed",
+                f"Failed to execute order for {symbol}. Check your account status."
+            )
+        elif isinstance(error, RateLimitError):
+            self._log_message("Rate limit exceeded, pausing trading")
+            self.is_trading = False
+            messagebox.showwarning(
+                "Rate Limit",
+                "API rate limit exceeded. Trading has been paused."
+            )
+        else:
+            self._log_message(f"Error processing {symbol}: {error}")
+    
+    def _handle_critical_trading_error(self, error: Exception) -> None:
+        """Handle critical trading loop errors.
+        
+        Args:
+            error: The exception that occurred.
+        """
+        if isinstance(error, APIConnectionError):
+            messagebox.showerror(
+                "Connection Lost",
+                "Lost connection to Alpaca API. Trading has been stopped."
+            )
+        elif isinstance(error, ConfigurationError):
+            messagebox.showerror(
+                "Configuration Error",
+                "Trading configuration is invalid. Please check your settings."
+            )
+        else:
+            messagebox.showerror(
+                "Trading Error",
+                f"Critical trading error: {error}"
+            )
+
+    def _update_displays(self) -> None:
+        """Update all display components."""
+        def _update_positions():
+            self._update_positions_display()
+        
+        def _update_orders():
+            self._update_orders_display()
+        
+        def _update_performance():
+            if hasattr(self, 'performance_display'):
+                self.performance_display.update_display()
+        
+        # Update each display component safely
+        safe_execute(
+            _update_positions,
+            error_handler=self.error_handler,
+            operation="update positions display"
+        )
+        
+        safe_execute(
+            _update_orders,
+            error_handler=self.error_handler,
+            operation="update orders display"
+        )
+        
+        safe_execute(
+            _update_performance,
+            error_handler=self.error_handler,
+            operation="update performance display"
+        )
+    
+    def _update_positions_display(self) -> None:
+        """Update the positions display."""
+        try:
+            # Clear existing items
+            for item in self.positions_tree.get_children():
+                self.positions_tree.delete(item)
+            
+            if not self.strategy:
+                return
+            
+            # Get current positions
+            for symbol, trade in self.strategy.active_positions.items():
+                try:
+                    # Get current quote
+                    quote = self.alpaca_client.get_latest_quote(symbol)
+                    current_price = quote.bid_price if quote else trade.entry_price
+                    
+                    # Calculate P&L
+                    pnl = (current_price - trade.entry_price) * trade.quantity
+                    pnl_pct = (current_price - trade.entry_price) / trade.entry_price * 100
+                    
+                    # Insert into treeview
+                    self.positions_tree.insert('', 'end', values=(
+                        symbol,
+                        trade.quantity,
+                        f"${trade.entry_price:.2f}",
+                        f"${current_price:.2f}",
+                        f"${pnl:+.2f}",
+                        f"{pnl_pct:+.2f}%"
+                    ))
+                    
+                except Exception as e:
+                    self.logger.error(f"Error updating position for {symbol}: {e}")
+                    
+        except Exception as e:
+            self.logger.error(f"Error updating positions display: {e}")
+    
+    def _update_orders_display(self) -> None:
+        """Update the orders display."""
+        try:
+            # Clear existing items
+            for item in self.orders_tree.get_children():
+                self.orders_tree.delete(item)
+            
+            if not self.alpaca_client:
+                return
+            
+            # Get recent orders
+            orders = self.alpaca_client.get_orders(status='all', limit=50)
+            if not orders:
+                return
+            
+            for order in orders:
+                try:
+                    # Format time
+                    order_time = order.created_at.strftime('%H:%M:%S')
+                    
+                    # Insert into treeview
+                    self.orders_tree.insert('', 'end', values=(
+                        order.id[:8] + '...',  # Truncated order ID
+                        order.symbol,
+                        order.side.upper(),
+                        order.qty,
+                        order.order_type.upper(),
+                        order.status.upper(),
+                        order_time
+                    ))
+                    
+                except Exception as e:
+                    self.logger.error(f"Error processing order {order.id}: {e}")
+                    
+        except Exception as e:
+            self.logger.error(f"Error updating orders display: {e}")
+    
+    def _update_time_display(self) -> None:
+        """Update the time display."""
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        self.time_display.config(text=current_time)
+        
+        # Schedule next update
+        self.root.after(1000, self._update_time_display)
+    
+    def _on_symbols_changed(self, symbols: List[str]) -> None:
+        """Handle symbol selection changes.
+        
+        Args:
+            symbols: List of selected symbols.
+        """
+        self.selected_symbols = symbols
+        self.logger.info(f"Selected symbols updated: {symbols}")
+    
+    def _on_config_changed(self, config: Dict) -> None:
+        """Handle configuration changes.
+        
+        Args:
+            config: Updated configuration.
+        """
+        def _update_config():
+            # Update strategy parameters if strategy exists
+            if self.strategy:
+                for key, value in config.items():
+                    if hasattr(self.strategy, key):
+                        setattr(self.strategy, key, value)
+                        
+            self.logger.info("Configuration updated")
+            return True
+        
+        safe_execute(
+            _update_config,
+            error_handler=self.error_handler,
+            operation="update configuration",
+            on_error=lambda e: messagebox.showerror(
+                "Configuration Error",
+                f"Failed to update configuration: {e}"
+            )
+        )
+    
+    def _log_message(self, message: str) -> None:
+        """Add a message to the log display.
+        
+        Args:
+            message: Message to log.
+        """
+        timestamp = datetime.now().strftime('%H:%M:%S')
+        log_entry = f"[{timestamp}] {message}\n"
+        
+        self.log_text.insert(tk.END, log_entry)
+        self.log_text.see(tk.END)
+    
+    def _clear_log(self) -> None:
+        """Clear the log display."""
+        self.log_text.delete(1.0, tk.END)
+    
+    def _refresh_log(self) -> None:
+        """Refresh the log display."""
+        # This could be enhanced to read from log files
+        pass
+    
+    def _show_settings(self) -> None:
+        """Show settings dialog."""
+        messagebox.showinfo("Settings", "Settings dialog not implemented yet.")
+    
+    def _show_positions(self) -> None:
+        """Show positions dialog."""
+        messagebox.showinfo("Positions", "Positions dialog not implemented yet.")
+    
+    def _show_orders(self) -> None:
+        """Show orders dialog."""
+        messagebox.showinfo("Orders", "Orders dialog not implemented yet.")
+    
+    def _show_trading_log(self) -> None:
+        """Show trading log dialog."""
+        messagebox.showinfo("Trading Log", "Trading log dialog not implemented yet.")
+    
+    def _show_performance(self) -> None:
+        """Show performance dialog."""
+        messagebox.showinfo("Performance", "Performance dialog not implemented yet.")
+    
+    def _show_about(self) -> None:
+        """Show about dialog."""
+        messagebox.showinfo(
+            "About",
+            "Alpaca Trading Bot\n\n"
+            "Automated scalping strategy for stock trading\n"
+            "using the Alpaca API.\n\n"
+            "Version 1.0"
+        )
+    
+    def _on_closing(self) -> None:
+        """Handle window closing event."""
+        def _shutdown_application():
+            if self.is_trading:
+                if messagebox.askyesno(
+                    "Confirm Exit",
+                    "Trading is currently active. Stop trading and exit?"
+                ):
+                    self._stop_trading()
+                else:
+                    return False
+            
+            self.logger.info("Application closing")
+            self.root.destroy()
+            return True
+        
+        safe_execute(
+            _shutdown_application,
+            error_handler=self.error_handler,
+            operation="application shutdown",
+            on_error=lambda e: self.root.destroy()  # Force close on error
+        )
+    
+    def run(self) -> None:
+        """Run the application."""
+        def _run_mainloop():
+            self.logger.info("Starting application")
+            self.root.mainloop()
+            return True
+        
+        safe_execute(
+            _run_mainloop,
+            error_handler=self.error_handler,
+            operation="application main loop",
+            on_error=lambda e: messagebox.showerror(
+                "Application Error", 
+                f"An error occurred: {e}"
+            )
+        )
+
+
+def main() -> None:
+    """Main entry point."""
+    # Setup logging
+    setup_logging()
+    
+    # Create and run application
+    app = MainWindow()
+    app.run()
+
+
+if __name__ == "__main__":
+    main()
