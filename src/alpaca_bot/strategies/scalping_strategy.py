@@ -34,15 +34,19 @@ from ..utils.error_handler import (
 class ScalpingStrategy:
     """Scalping strategy for automated trading."""
     
-    def __init__(self, alpaca_client: AlpacaClient):
+    def __init__(self, alpaca_client: AlpacaClient, account_update_callback=None, order_update_callback=None):
         """Initialize the scalping strategy.
         
         Args:
             alpaca_client: Alpaca API client instance.
+            account_update_callback: Callback function to trigger account updates.
+            order_update_callback: Callback function to trigger order display updates.
         """
         self.alpaca_client = alpaca_client
         self.logger = logging.getLogger(__name__)
         self.error_handler = ErrorHandler(self.logger)
+        self.account_update_callback = account_update_callback
+        self.order_update_callback = order_update_callback
         
         # Strategy parameters from settings
         self.support_threshold = settings.support_threshold
@@ -364,6 +368,15 @@ class ScalpingStrategy:
             )
             
             self.logger.info(f"Buy order placed for {symbol}: {quantity} shares")
+            
+            # Trigger account update callback if available
+            if self.account_update_callback:
+                self.account_update_callback()
+            
+            # Trigger order update callback if available
+            if self.order_update_callback:
+                self.order_update_callback()
+            
             return trade
         
         return safe_execute(
@@ -425,6 +438,15 @@ class ScalpingStrategy:
             )
             
             self.logger.info(f"Sell order placed for {symbol}: {position_trade.quantity} shares")
+            
+            # Trigger account update callback if available
+            if self.account_update_callback:
+                self.account_update_callback()
+            
+            # Trigger order update callback if available
+            if self.order_update_callback:
+                self.order_update_callback()
+            
             return trade
         
         return safe_execute(

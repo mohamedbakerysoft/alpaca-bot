@@ -62,6 +62,13 @@ class Settings:
             cast=float
         )
         
+        # Trading Mode
+        self.aggressive_mode: bool = config(
+            "AGGRESSIVE_MODE",
+            default=False,
+            cast=bool
+        )
+        
         # Application Configuration
         self.log_level: str = config(
             "LOG_LEVEL",

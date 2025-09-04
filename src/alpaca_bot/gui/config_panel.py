@@ -235,6 +235,17 @@ class ConfigPanel:
         self._create_labeled_entry(limits_frame, "Max Daily Loss ($):", 'max_daily_loss', row=2)
         self._create_labeled_spinbox(limits_frame, "Max Daily Trades:", 'max_daily_trades', 1, 100, row=3)
         self._create_labeled_spinbox(limits_frame, "Max Positions:", 'max_positions', 1, 20, row=4)
+        
+        # Trading mode section
+        mode_frame = ttk.LabelFrame(risk_frame, text="Trading Mode", padding=10)
+        mode_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        aggressive_checkbox = ttk.Checkbutton(
+            mode_frame,
+            text="Aggressive Mode (Higher risk, more frequent trades)",
+            variable=self.config_vars['aggressive_mode']
+        )
+        aggressive_checkbox.pack(anchor=tk.W, padx=5, pady=5)
     
     def _create_trading_hours_tab(self) -> None:
         """Create trading hours tab."""
@@ -607,6 +618,9 @@ class ConfigPanel:
                 'LOG_LEVEL': 'log_level',
                 'LOG_TO_FILE': 'log_to_file',
                 'MAX_LOG_FILES': 'max_log_files',
+                
+                # Trading mode
+                'AGGRESSIVE_MODE': 'aggressive_mode',
             }
             
             # Update settings

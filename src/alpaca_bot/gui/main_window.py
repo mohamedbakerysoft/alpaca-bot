@@ -164,7 +164,8 @@ class MainWindow:
         self.trading_panel = TradingPanel(parent)
         
         # Configuration panel
-        self.config_panel = ConfigPanel(parent, self._on_config_changed)
+        from ..config.settings import settings
+        self.config_panel = ConfigPanel(parent, settings, self._on_config_changed)
     
     def _create_display_panel(self, parent: ttk.Frame) -> None:
         """Create the display panel.
@@ -254,13 +255,26 @@ class MainWindow:
         Args:
             parent: Parent frame.
         """
-        # Orders treeview
-        columns = ('Order ID', 'Symbol', 'Side', 'Quantity', 'Type', 'Status', 'Time')
+        # Orders treeview with enhanced columns
+        columns = ('Order ID', 'Symbol', 'Side', 'Quantity', 'Type', 'Status', 'Price', 'Filled', 'Time')
         self.orders_tree = ttk.Treeview(parent, columns=columns, show='headings')
+        
+        # Configure column widths and headings
+        column_widths = {
+            'Order ID': 80,
+            'Symbol': 70,
+            'Side': 50,
+            'Quantity': 70,
+            'Type': 70,
+            'Status': 80,
+            'Price': 80,
+            'Filled': 80,
+            'Time': 80
+        }
         
         for col in columns:
             self.orders_tree.heading(col, text=col)
-            self.orders_tree.column(col, width=100, anchor=tk.CENTER)
+            self.orders_tree.column(col, width=column_widths.get(col, 100), anchor=tk.CENTER)
         
         # Scrollbar for orders
         orders_scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=self.orders_tree.yview)
@@ -268,6 +282,12 @@ class MainWindow:
         
         self.orders_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
         orders_scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
+        
+        # Configure status-based row colors
+        self.orders_tree.tag_configure('filled', background='#d4edda')
+        self.orders_tree.tag_configure('pending', background='#fff3cd')
+        self.orders_tree.tag_configure('cancelled', background='#f8d7da')
+        self.orders_tree.tag_configure('rejected', background='#f8d7da')
     
     def _create_status_bar(self) -> None:
         """Create the status bar."""
@@ -303,6 +323,9 @@ class MainWindow:
         
         # Update time display
         self._update_time_display()
+        
+        # Start order status updates
+        self._start_order_updates()
     
     def _initialize_api_client(self) -> None:
         """Initialize the Alpaca API client."""
@@ -320,8 +343,12 @@ class MainWindow:
                 status_text = f"Market: {'Open' if is_market_open else 'Closed'}"
                 self.market_status.config(text=status_text)
                 
-                # Initialize strategy
-                self.strategy = ScalpingStrategy(self.alpaca_client)
+                # Initialize strategy with account and order update callbacks
+                self.strategy = ScalpingStrategy(
+                    self.alpaca_client, 
+                    account_update_callback=self._trigger_account_update,
+                    order_update_callback=self._trigger_order_update
+                )
                 
                 self.logger.info("API client initialized successfully")
                 return True
@@ -389,6 +416,25 @@ class MainWindow:
         except Exception as e:
             self.logger.error(f"Error updating account info: {e}")
             self.account_info.config(text="Error loading account info")
+    
+    def _trigger_account_update(self) -> None:
+        """Trigger immediate account update from strategy callback."""
+        def _update_account():
+            if self.alpaca_client:
+                account = self.alpaca_client.get_account()
+                if account:
+                    self._update_account_info(account)
+        
+        # Schedule update on main thread
+        self.root.after(0, _update_account)
+    
+    def _trigger_order_update(self) -> None:
+        """Trigger immediate order display update from strategy callback."""
+        def _update_orders():
+            self._update_orders_display()
+        
+        # Schedule update on main thread
+        self.root.after(0, _update_orders)
     
     def _toggle_trading(self) -> None:
         """Toggle trading on/off."""
@@ -701,7 +747,7 @@ class MainWindow:
             self.logger.error(f"Error updating positions display: {e}")
     
     def _update_orders_display(self) -> None:
-        """Update the orders display."""
+        """Update the orders display with enhanced information."""
         try:
             # Clear existing items
             for item in self.orders_tree.get_children():
@@ -720,16 +766,40 @@ class MainWindow:
                     # Format time
                     order_time = order.created_at.strftime('%H:%M:%S')
                     
-                    # Insert into treeview
-                    self.orders_tree.insert('', 'end', values=(
+                    # Format price
+                    price_str = f"${float(order.limit_price):.2f}" if order.limit_price else "Market"
+                    
+                    # Format filled quantity and percentage
+                    filled_qty = float(order.filled_qty) if order.filled_qty else 0
+                    total_qty = float(order.qty)
+                    filled_pct = (filled_qty / total_qty * 100) if total_qty > 0 else 0
+                    filled_str = f"{filled_qty:.0f} ({filled_pct:.0f}%)"
+                    
+                    # Determine status tag for color coding
+                    status = order.status.lower()
+                    if status in ['filled', 'partially_filled']:
+                        tag = 'filled'
+                    elif status in ['new', 'accepted', 'pending_new']:
+                        tag = 'pending'
+                    elif status in ['canceled', 'cancelled']:
+                        tag = 'cancelled'
+                    elif status in ['rejected', 'expired']:
+                        tag = 'rejected'
+                    else:
+                        tag = ''
+                    
+                    # Insert into treeview with color coding
+                    item = self.orders_tree.insert('', 'end', values=(
                         order.id[:8] + '...',  # Truncated order ID
                         order.symbol,
                         order.side.upper(),
-                        order.qty,
+                        f"{total_qty:.0f}",
                         order.order_type.upper(),
-                        order.status.upper(),
+                        order.status.upper().replace('_', ' '),
+                        price_str,
+                        filled_str,
                         order_time
-                    ))
+                    ), tags=(tag,) if tag else ())
                     
                 except Exception as e:
                     self.logger.error(f"Error processing order {order.id}: {e}")
@@ -744,6 +814,12 @@ class MainWindow:
         
         # Schedule next update
         self.root.after(1000, self._update_time_display)
+    
+    def _start_order_updates(self) -> None:
+        """Start periodic order status updates."""
+        self._update_orders_display()
+        # Schedule next update every 5 seconds
+        self.root.after(5000, self._start_order_updates)
     
     def _on_symbols_changed(self, symbols: List[str]) -> None:
         """Handle symbol selection changes.
