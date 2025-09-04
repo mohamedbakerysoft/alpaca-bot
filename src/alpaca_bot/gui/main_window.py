@@ -336,9 +336,8 @@ class MainWindow:
         
         success = safe_execute(
             _init_client,
-            error_handler=self.error_handler,
-            operation="API client initialization",
-            on_error=lambda e: self._handle_connection_error(e)
+            default_return=False,
+            log_errors=True
         )
         
         if not success:
@@ -446,8 +445,8 @@ class MainWindow:
         
         safe_execute(
             _start_trading_internal,
-            self.error_handler,
-            error_handler=_handle_start_error
+            default_return=None,
+            log_errors=True
         )
     
     def _stop_trading(self) -> None:
@@ -469,9 +468,8 @@ class MainWindow:
         
         safe_execute(
             _stop_trading_internal,
-            error_handler=self.error_handler,
-            operation="stop trading",
-            on_error=lambda e: messagebox.showerror("Error", f"Failed to stop trading: {e}")
+            default_return=None,
+            log_errors=True
         )
     
     def _trading_loop(self) -> None:
@@ -483,8 +481,8 @@ class MainWindow:
                 if self.strategy:
                     safe_execute(
                         self.strategy.update_positions,
-                        error_handler=self.error_handler,
-                        operation="update positions"
+                        default_return=None,
+                        log_errors=True
                     )
                 
                 # Analyze each selected symbol
@@ -517,9 +515,8 @@ class MainWindow:
                     
                     safe_execute(
                         _process_symbol,
-                        error_handler=self.error_handler,
-                        operation=f"process symbol {symbol}",
-                        on_error=lambda e: self._handle_trading_error(symbol, e)
+                        default_return=None,
+                        log_errors=True
                     )
                 
                 # Sleep between iterations
@@ -538,8 +535,8 @@ class MainWindow:
         try:
             safe_execute(
                 _run_trading_loop,
-                self.error_handler,
-                error_handler=_handle_loop_error
+                default_return=None,
+                log_errors=True
             )
         finally:
             _cleanup()
@@ -606,20 +603,20 @@ class MainWindow:
         # Update each display component safely
         safe_execute(
             _update_positions,
-            error_handler=self.error_handler,
-            operation="update positions display"
+            default_return=None,
+            log_errors=True
         )
         
         safe_execute(
             _update_orders,
-            error_handler=self.error_handler,
-            operation="update orders display"
+            default_return=None,
+            log_errors=True
         )
         
         safe_execute(
             _update_performance,
-            error_handler=self.error_handler,
-            operation="update performance display"
+            default_return=None,
+            log_errors=True
         )
     
     def _update_positions_display(self) -> None:
@@ -731,12 +728,8 @@ class MainWindow:
         
         safe_execute(
             _update_config,
-            error_handler=self.error_handler,
-            operation="update configuration",
-            on_error=lambda e: messagebox.showerror(
-                "Configuration Error",
-                f"Failed to update configuration: {e}"
-            )
+            default_return=None,
+            log_errors=True
         )
     
     def _log_message(self, message: str) -> None:
@@ -808,9 +801,8 @@ class MainWindow:
         
         safe_execute(
             _shutdown_application,
-            error_handler=self.error_handler,
-            operation="application shutdown",
-            on_error=lambda e: self.root.destroy()  # Force close on error
+            default_return=None,
+            log_errors=True
         )
     
     def run(self) -> None:
@@ -822,12 +814,8 @@ class MainWindow:
         
         safe_execute(
             _run_mainloop,
-            error_handler=self.error_handler,
-            operation="application main loop",
-            on_error=lambda e: messagebox.showerror(
-                "Application Error", 
-                f"An error occurred: {e}"
-            )
+            default_return=None,
+            log_errors=True
         )
 
 

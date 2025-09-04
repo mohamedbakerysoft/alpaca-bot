@@ -459,8 +459,8 @@ class TradingPanel:
         
         safe_execute(
             _update_display,
-            self.error_handler,
-            error_handler=_handle_display_error
+            default_return=None,
+            log_errors=True
         )
     
     def _reset_statistics(self) -> None:
