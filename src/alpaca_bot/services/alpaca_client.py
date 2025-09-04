@@ -317,11 +317,15 @@ class AlpacaClient:
                 end = datetime.now()
             
             # Get bars from Alpaca
+            # Format datetime to RFC3339 without microseconds
+            start_str = start.strftime('%Y-%m-%dT%H:%M:%SZ')
+            end_str = end.strftime('%Y-%m-%dT%H:%M:%SZ')
+            
             bars = self.api.get_bars(
                 symbol,
                 timeframe,
-                start=start.isoformat(),
-                end=end.isoformat(),
+                start=start_str,
+                end=end_str,
                 limit=limit,
             )
             

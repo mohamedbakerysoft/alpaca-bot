@@ -89,8 +89,8 @@ class ScalpingStrategy:
             bars = self.alpaca_client.get_bars(
                 symbol=symbol,
                 timeframe=timeframe,
-                start=start_time.isoformat(),
-                end=end_time.isoformat(),
+                start=start_time,
+                end=end_time,
                 limit=lookback_periods
             )
             
@@ -163,9 +163,8 @@ class ScalpingStrategy:
         
         return safe_execute(
             _perform_analysis,
-            error_handler=self.error_handler,
-            operation=f"symbol analysis for {symbol}",
-            on_error=lambda e: None
+            default_return=None,
+            log_errors=True
         )
     
     def generate_signals(self, stock_data: StockData) -> List[Tuple[str, str]]:
@@ -244,9 +243,8 @@ class ScalpingStrategy:
         
         return safe_execute(
             _perform_trade,
-            error_handler=self.error_handler,
-            operation=f"{signal_type} trade execution for {symbol}",
-            on_error=_handle_trade_error
+            default_return=None,
+            log_errors=True
         )
     
     def _execute_buy_order(self, symbol: str, reason: str) -> Optional[Trade]:
@@ -313,9 +311,8 @@ class ScalpingStrategy:
         
         return safe_execute(
             _place_buy_order,
-            error_handler=self.error_handler,
-            operation=f"buy order placement for {symbol}",
-            on_error=lambda e: None
+            default_return=None,
+            log_errors=True
         )
     
     def _execute_sell_order(self, symbol: str, reason: str) -> Optional[Trade]:
@@ -376,9 +373,8 @@ class ScalpingStrategy:
         
         return safe_execute(
             _place_sell_order,
-            error_handler=self.error_handler,
-            operation=f"sell order placement for {symbol}",
-            on_error=lambda e: None
+            default_return=None,
+            log_errors=True
         )
     
     def check_exit_conditions(self, symbol: str) -> Optional[Tuple[str, str]]:
@@ -457,9 +453,8 @@ class ScalpingStrategy:
         
         safe_execute(
             _update_all_positions,
-            error_handler=self.error_handler,
-            operation="position updates",
-            on_error=lambda e: None
+            default_return=None,
+            log_errors=True
         )
     
     def _handle_order_filled(self, symbol: str, order) -> None:
@@ -506,9 +501,8 @@ class ScalpingStrategy:
         
         safe_execute(
             _process_filled_order,
-            error_handler=self.error_handler,
-            operation=f"order fill processing for {symbol}",
-            on_error=lambda e: None
+            default_return=None,
+            log_errors=True
         )
     
     def _handle_order_cancelled(self, symbol: str, order) -> None:
