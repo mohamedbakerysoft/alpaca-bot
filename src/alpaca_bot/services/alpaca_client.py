@@ -419,16 +419,32 @@ class AlpacaClient:
             # Handle IEX quote object structure
             # IEX quotes may have different attribute names or structure
             try:
-                bid_price = getattr(quote, 'bid_price', getattr(quote, 'bid', 0.0))
-                ask_price = getattr(quote, 'ask_price', getattr(quote, 'ask', 0.0))
+                bid_price = getattr(quote, 'bid_price', getattr(quote, 'bid', None))
+                ask_price = getattr(quote, 'ask_price', getattr(quote, 'ask', None))
                 bid_size = getattr(quote, 'bid_size', 0)
                 ask_size = getattr(quote, 'ask_size', 0)
+                
+                # If bid or ask prices are None, 0, or negative, use last trade price
+                if not bid_price or bid_price <= 0 or not ask_price or ask_price <= 0:
+                    trade = self.api.get_latest_trade(symbol, feed='iex')
+                    trade_price = float(trade.price)
+                    # Use trade price with a small spread for bid/ask
+                    spread = trade_price * 0.001  # 0.1% spread
+                    bid_price = trade_price - spread
+                    ask_price = trade_price + spread
+                    bid_size = ask_size = 0
+                    self.logger.warning(f"Invalid quote data for {symbol}, using trade price ${trade_price:.2f} with synthetic spread")
+                    
             except AttributeError:
                 # Fallback: use the last trade price as both bid and ask
                 trade = self.api.get_latest_trade(symbol, feed='iex')
-                bid_price = ask_price = float(trade.price)
+                trade_price = float(trade.price)
+                # Use trade price with a small spread for bid/ask
+                spread = trade_price * 0.001  # 0.1% spread
+                bid_price = trade_price - spread
+                ask_price = trade_price + spread
                 bid_size = ask_size = 0
-                self.logger.warning(f"Quote attributes not available for {symbol}, using trade price")
+                self.logger.warning(f"Quote attributes not available for {symbol}, using trade price ${trade_price:.2f} with synthetic spread")
             
             return {
                 'bid': float(bid_price),

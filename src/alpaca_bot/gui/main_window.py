@@ -597,7 +597,11 @@ class MainWindow:
         
         def _update_performance():
             if hasattr(self, 'performance_display'):
-                self.performance_display.update_display()
+                # Get current trades from strategy if available
+                trades = []
+                if hasattr(self, 'strategy') and self.strategy:
+                    trades = getattr(self.strategy, 'completed_trades', [])
+                self.performance_display.update_trades(trades)
         
         # Update each display component safely
         safe_execute(

@@ -106,9 +106,9 @@ class ScalpingStrategy:
             
             # Calculate Bollinger Bands
             bb_upper, bb_middle, bb_lower = calculate_bollinger_bands(df['close'])
-            df['bb_upper'] = bb_upper
-            df['bb_middle'] = bb_middle
-            df['bb_lower'] = bb_lower
+            df['bollinger_upper'] = bb_upper
+            df['bollinger_middle'] = bb_middle
+            df['bollinger_lower'] = bb_lower
             
             # Calculate support and resistance levels
             support_levels, resistance_levels = identify_support_resistance_levels(df)
@@ -139,9 +139,9 @@ class ScalpingStrategy:
                     timestamp=datetime.now(),
                     rsi=df['rsi'].iloc[-1] if not pd.isna(df['rsi'].iloc[-1]) else None,
                     sma_20=df['sma_20'].iloc[-1] if not pd.isna(df['sma_20'].iloc[-1]) else None,
-                    bollinger_upper=df['bb_upper'].iloc[-1] if not pd.isna(df['bb_upper'].iloc[-1]) else None,
-                    bollinger_middle=df['bb_middle'].iloc[-1] if not pd.isna(df['bb_middle'].iloc[-1]) else None,
-                    bollinger_lower=df['bb_lower'].iloc[-1] if not pd.isna(df['bb_lower'].iloc[-1]) else None,
+                    bollinger_upper=df['bollinger_upper'].iloc[-1] if not pd.isna(df['bollinger_upper'].iloc[-1]) else None,
+                     bollinger_middle=df['bollinger_middle'].iloc[-1] if not pd.isna(df['bollinger_middle'].iloc[-1]) else None,
+                     bollinger_lower=df['bollinger_lower'].iloc[-1] if not pd.isna(df['bollinger_lower'].iloc[-1]) else None,
                 )
             )
             
@@ -175,9 +175,12 @@ class ScalpingStrategy:
             return signals
         
         # Get technical indicators
-        rsi = stock_data.technical_indicators.get('rsi')
-        bb_lower = stock_data.technical_indicators.get('bb_lower')
-        bb_upper = stock_data.technical_indicators.get('bb_upper')
+        if stock_data.technical_indicators is None:
+            return signals
+        
+        rsi = stock_data.technical_indicators.rsi
+        bb_lower = stock_data.technical_indicators.bollinger_lower
+        bb_upper = stock_data.technical_indicators.bollinger_upper
         
         # Find nearest support and resistance levels
         nearest_support = self._find_nearest_support(stock_data, current_price)
@@ -407,12 +410,15 @@ class ScalpingStrategy:
                 return ("SELL", f"Near resistance at ${nearest_resistance.price:.2f}")
         
         # RSI overbought condition
-        rsi = stock_data.technical_indicators.get('rsi')
+        if stock_data.technical_indicators is None:
+            return None
+        
+        rsi = stock_data.technical_indicators.rsi
         if rsi and rsi >= self.rsi_overbought:
             return ("SELL", f"RSI overbought ({rsi:.1f})")
         
         # Upper Bollinger Band condition
-        bb_upper = stock_data.technical_indicators.get('bb_upper')
+        bb_upper = stock_data.technical_indicators.bollinger_upper
         if bb_upper and current_price >= bb_upper * 0.99:  # Within 1% of upper band
             return ("SELL", f"Near upper Bollinger Band (${bb_upper:.2f})")
         
