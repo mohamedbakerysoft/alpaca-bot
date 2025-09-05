@@ -23,6 +23,7 @@ from ..utils.error_handler import (
     MarketDataError, OrderExecutionError, ConfigurationError,
     RateLimitError, safe_execute
 )
+from ..utils.market_utils import market_hours
 from .stock_selector import StockSelectorFrame
 from .trading_panel import TradingPanel
 from .performance_display import PerformanceDisplay
@@ -347,10 +348,8 @@ class MainWindow:
                 self.connection_status.config(text="Connected")
                 self._update_account_info(account)
                 
-                # Check market status
-                is_market_open = self.alpaca_client.is_market_open()
-                status_text = f"Market: {'Open' if is_market_open else 'Closed'}"
-                self.market_status.config(text=status_text)
+                # Market status will be updated by _update_market_status method
+                # which is called periodically by _update_time_display
                 
                 # Initialize strategy with account and order update callbacks
                 self.strategy = ScalpingStrategy(
@@ -470,11 +469,26 @@ class MainWindow:
                 )
                 return
             
+            # Check market hours
+            is_open, market_status = market_hours.get_market_status()
+            if not is_open:
+                time_until_open = market_hours.get_time_until_open()
+                message = f"Market is currently closed.\n\n{market_status}"
+                if time_until_open:
+                    message += f"\nTime until market opens: {time_until_open}"
+                
+                messagebox.showwarning(
+                    "Market Closed",
+                    message
+                )
+                return
+            
             # Confirm start trading
             if not messagebox.askyesno(
                 "Confirm",
                 f"Start trading with {len(self.selected_symbols)} symbols?\n"
-                f"Symbols: {', '.join(self.selected_symbols)}"
+                f"Symbols: {', '.join(self.selected_symbols)}\n\n"
+                f"Market Status: {market_status}"
             ):
                 return
             
@@ -817,12 +831,32 @@ class MainWindow:
             self.logger.error(f"Error updating orders display: {e}")
     
     def _update_time_display(self) -> None:
-        """Update the time display."""
+        """Update the time display and market status."""
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         self.time_display.config(text=current_time)
         
+        # Update market status
+        self._update_market_status()
+        
         # Schedule next update
         self.root.after(1000, self._update_time_display)
+    
+    def _update_market_status(self) -> None:
+        """Update the market status display."""
+        try:
+            is_open, status_message = market_hours.get_market_status()
+            status_text = f"Market: {status_message}"
+            
+            if not is_open:
+                time_until_open = market_hours.get_time_until_open()
+                if time_until_open:
+                    status_text += f" (Opens in {time_until_open})"
+            
+            self.market_status.config(text=status_text)
+            
+        except Exception as e:
+            self.logger.error(f"Error updating market status: {e}")
+            self.market_status.config(text="Market: Unknown")
     
     def _start_order_updates(self) -> None:
         """Start periodic order status updates."""
