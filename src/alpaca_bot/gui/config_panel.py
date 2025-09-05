@@ -108,8 +108,8 @@ class ConfigPanel:
             'log_to_file': tk.BooleanVar(value=True),
             'max_log_files': tk.IntVar(value=10),
             
-            # Aggressive mode
-            'aggressive_mode': tk.BooleanVar(value=False),
+            # Trading mode
+            'trading_mode': tk.StringVar(value='conservative'),
         })
     
     def _create_widgets(self) -> None:
@@ -188,16 +188,36 @@ class ConfigPanel:
         self._create_labeled_spinbox(macd_frame, "Slow Period:", 'macd_slow', 10, 100, row=1)
         self._create_labeled_spinbox(macd_frame, "Signal Period:", 'macd_signal', 5, 20, row=2)
         
-        # Aggressive mode section
-        aggressive_frame = ttk.LabelFrame(scrollable_frame, text="Trading Mode", padding=10)
-        aggressive_frame.pack(fill=tk.X, padx=5, pady=5)
+        # Trading mode section
+        mode_frame = ttk.LabelFrame(scrollable_frame, text="Trading Mode", padding=10)
+        mode_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        aggressive_cb = ttk.Checkbutton(
-            aggressive_frame,
-            text="Aggressive Mode (Higher risk, more frequent trades)",
-            variable=self.config_vars['aggressive_mode']
+        ttk.Label(mode_frame, text="Trading Mode:").pack(anchor=tk.W, pady=2)
+        mode_combo = ttk.Combobox(
+            mode_frame,
+            textvariable=self.config_vars['trading_mode'],
+            values=['ultra_safe', 'conservative', 'aggressive'],
+            state='readonly',
+            width=20
         )
-        aggressive_cb.pack(anchor=tk.W, pady=2)
+        mode_combo.pack(anchor=tk.W, pady=2)
+        
+        # Mode descriptions
+        descriptions = {
+            'ultra_safe': 'Ultra-Safe: Minimal risk, very conservative parameters',
+            'conservative': 'Conservative: Balanced risk and reward (default)',
+            'aggressive': 'Aggressive: Higher risk, more frequent trades'
+        }
+        
+        desc_label = ttk.Label(mode_frame, text=descriptions['conservative'], foreground='gray')
+        desc_label.pack(anchor=tk.W, pady=2)
+        
+        def update_description(event=None):
+            selected = self.config_vars['trading_mode'].get()
+            desc_label.config(text=descriptions.get(selected, ''))
+        
+        mode_combo.bind('<<ComboboxSelected>>', update_description)
+        self.config_vars['trading_mode'].trace('w', lambda *args: update_description())
         
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
@@ -240,12 +260,32 @@ class ConfigPanel:
         mode_frame = ttk.LabelFrame(risk_frame, text="Trading Mode", padding=10)
         mode_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        aggressive_checkbox = ttk.Checkbutton(
+        ttk.Label(mode_frame, text="Trading Mode:").pack(anchor=tk.W, pady=2)
+        mode_combo_risk = ttk.Combobox(
             mode_frame,
-            text="Aggressive Mode (Higher risk, more frequent trades)",
-            variable=self.config_vars['aggressive_mode']
+            textvariable=self.config_vars['trading_mode'],
+            values=['ultra_safe', 'conservative', 'aggressive'],
+            state='readonly',
+            width=20
         )
-        aggressive_checkbox.pack(anchor=tk.W, padx=5, pady=5)
+        mode_combo_risk.pack(anchor=tk.W, pady=2)
+        
+        # Mode descriptions for risk tab
+        risk_descriptions = {
+            'ultra_safe': 'Ultra-Safe: Minimal risk, very conservative parameters',
+            'conservative': 'Conservative: Balanced risk and reward (default)',
+            'aggressive': 'Aggressive: Higher risk, more frequent trades'
+        }
+        
+        risk_desc_label = ttk.Label(mode_frame, text=risk_descriptions['conservative'], foreground='gray')
+        risk_desc_label.pack(anchor=tk.W, pady=2)
+        
+        def update_risk_description(event=None):
+            selected = self.config_vars['trading_mode'].get()
+            risk_desc_label.config(text=risk_descriptions.get(selected, ''))
+        
+        mode_combo_risk.bind('<<ComboboxSelected>>', update_risk_description)
+        self.config_vars['trading_mode'].trace('w', lambda *args: update_risk_description())
     
     def _create_trading_hours_tab(self) -> None:
         """Create trading hours tab."""
@@ -549,6 +589,9 @@ class ConfigPanel:
                 'log_level': 'LOG_LEVEL',
                 'log_to_file': 'LOG_TO_FILE',
                 'max_log_files': 'MAX_LOG_FILES',
+                
+                # Trading mode
+                'trading_mode': 'trading_mode',
             }
             
             # Load values from settings
@@ -620,7 +663,7 @@ class ConfigPanel:
                 'MAX_LOG_FILES': 'max_log_files',
                 
                 # Trading mode
-                'AGGRESSIVE_MODE': 'aggressive_mode',
+                'trading_mode': 'trading_mode',
             }
             
             # Update settings

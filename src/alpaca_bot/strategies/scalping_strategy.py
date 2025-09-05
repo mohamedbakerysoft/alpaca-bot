@@ -10,6 +10,7 @@ This module implements a scalping strategy that:
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
+from enum import Enum
 
 import pandas as pd
 from alpaca_trade_api.rest import REST
@@ -29,6 +30,13 @@ from ..utils.error_handler import (
     ErrorHandler, MarketDataError, OrderExecutionError,
     safe_execute
 )
+
+
+class TradingMode(Enum):
+    """Trading mode enumeration."""
+    ULTRA_SAFE = "ultra_safe"
+    CONSERVATIVE = "conservative"
+    AGGRESSIVE = "aggressive"
 
 
 class ScalpingStrategy:
@@ -63,9 +71,14 @@ class ScalpingStrategy:
         self.min_profit_for_trailing = 0.005  # 0.5% minimum profit before enabling trailing
         self.dynamic_exit_enabled = True
         
-        # Aggressive mode parameters
-        self.aggressive_mode = getattr(settings, 'aggressive_mode', False)
-        self._update_aggressive_parameters()
+        # Trading mode parameters
+        trading_mode_str = getattr(settings, 'trading_mode', 'conservative')
+        try:
+            self.trading_mode = TradingMode(trading_mode_str)
+        except ValueError:
+            self.logger.warning(f"Invalid trading mode '{trading_mode_str}', defaulting to conservative")
+            self.trading_mode = TradingMode.CONSERVATIVE
+        self._update_trading_mode_parameters()
         
         # Active positions and orders
         self.active_positions: Dict[str, Trade] = {}
@@ -78,9 +91,21 @@ class ScalpingStrategy:
         
         self.logger.info("Scalping strategy initialized")
     
-    def _update_aggressive_parameters(self) -> None:
-        """Update strategy parameters based on aggressive mode."""
-        if self.aggressive_mode:
+    def _update_trading_mode_parameters(self) -> None:
+        """Update strategy parameters based on trading mode."""
+        if self.trading_mode == TradingMode.ULTRA_SAFE:
+            # Ultra-safe parameters for maximum capital preservation
+            self.rsi_oversold = 25.0  # Very oversold threshold
+            self.rsi_overbought = 75.0  # Very overbought threshold
+            self.support_threshold = 0.015  # Wider support threshold (1.5%)
+            self.resistance_threshold = 0.015  # Wider resistance threshold (1.5%)
+            self.take_profit_pct = 0.015  # Lower take profit (1.5%)
+            self.stop_loss_pct = 0.008  # Very tight stop loss (0.8%)
+            self.trailing_stop_pct = 0.012  # Wider trailing stop (1.2%)
+            self.min_profit_for_trailing = 0.008  # Higher threshold for trailing (0.8%)
+            self.min_buy_score = 4  # Require higher confidence
+            self.logger.info("Ultra-safe mode enabled - using maximum safety parameters")
+        elif self.trading_mode == TradingMode.AGGRESSIVE:
             # More aggressive parameters for higher risk/reward
             self.rsi_oversold = 35.0  # Less oversold threshold
             self.rsi_overbought = 65.0  # Less overbought threshold
@@ -90,9 +115,10 @@ class ScalpingStrategy:
             self.stop_loss_pct = 0.012  # Tighter stop loss (1.2%)
             self.trailing_stop_pct = 0.008  # Tighter trailing stop (0.8%)
             self.min_profit_for_trailing = 0.003  # Lower threshold for trailing (0.3%)
+            self.min_buy_score = 2  # Lower confidence requirement
             self.logger.info("Aggressive mode enabled - using higher risk parameters")
-        else:
-            # Conservative parameters
+        else:  # CONSERVATIVE
+            # Conservative parameters (default)
             self.rsi_oversold = getattr(settings, 'rsi_oversold', 30.0)
             self.rsi_overbought = getattr(settings, 'rsi_overbought', 70.0)
             self.support_threshold = settings.support_threshold
@@ -101,16 +127,17 @@ class ScalpingStrategy:
             self.stop_loss_pct = settings.stop_loss_percentage
             self.trailing_stop_pct = 0.01  # Standard trailing stop (1%)
             self.min_profit_for_trailing = 0.005  # Standard threshold for trailing (0.5%)
+            self.min_buy_score = 3  # Standard confidence requirement
             self.logger.info("Conservative mode enabled - using standard risk parameters")
     
-    def set_aggressive_mode(self, aggressive: bool) -> None:
-        """Set aggressive mode and update parameters.
+    def set_trading_mode(self, mode: TradingMode) -> None:
+        """Set trading mode and update parameters.
         
         Args:
-            aggressive: Whether to enable aggressive mode.
+            mode: The trading mode to set.
         """
-        self.aggressive_mode = aggressive
-        self._update_aggressive_parameters()
+        self.trading_mode = mode
+        self._update_trading_mode_parameters()
     
     def analyze_symbol(self, symbol: str, timeframe: str = '1Min', 
                       lookback_periods: int = 100) -> Optional[StockData]:
@@ -310,7 +337,7 @@ class ScalpingStrategy:
         
         # Calculate total score
         total_score = sum(condition_scores)
-        min_score = 4 if self.aggressive_mode else 5  # Lower threshold for aggressive mode
+        min_score = self.min_buy_score  # Use trading mode specific threshold
         
         # Log conditions found
         self.logger.info(f"{symbol}: Buy conditions met: {len(buy_conditions)} (score: {total_score}/{min_score}) - {buy_conditions}")
@@ -888,8 +915,8 @@ class ScalpingStrategy:
         elif current_price < 20:
             price_multiplier = 1.2
         
-        # Aggressive mode adjustment
-        mode_multiplier = 1.3 if self.aggressive_mode else 1.0
+        # Trading mode adjustment
+        mode_multiplier = 1.3 if self.trading_mode == TradingMode.AGGRESSIVE else 1.0
         
         # Calculate final position size
         dynamic_size = (base_position_size * 

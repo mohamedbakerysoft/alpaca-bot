@@ -30,9 +30,15 @@ class TradingPanel:
         self.logger = get_logger(__name__)
         self.error_handler = ErrorHandler()
         
-        # Create main frame
-        self.frame = ttk.LabelFrame(parent, text="Trading Panel", padding=10)
+        # Create main frame with enhanced styling
+        self.frame = ttk.LabelFrame(parent, text="Trading Panel", padding=8)
         self.frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Configure frame style for better visibility
+        style = ttk.Style()
+        style.configure('TradingPanel.TLabelframe', relief='raised', borderwidth=2)
+        style.configure('TradingPanel.TLabelframe.Label', font=('TkDefaultFont', 10, 'bold'))
+        self.frame.configure(style='TradingPanel.TLabelframe')
         
         # Trading statistics
         self.stats = {
@@ -49,24 +55,177 @@ class TradingPanel:
     
     def _create_widgets(self) -> None:
         """Create the panel widgets."""
-        # Create notebook for different sections
+        # Create a more compact layout with key info at the top
+        
+        # Quick stats section (always visible)
+        quick_stats_frame = ttk.Frame(self.frame)
+        quick_stats_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        self._create_quick_stats_section(quick_stats_frame)
+        
+        # Create notebook for detailed sections
         notebook = ttk.Notebook(self.frame)
         notebook.pack(fill=tk.BOTH, expand=True)
         
         # Statistics tab
         stats_frame = ttk.Frame(notebook)
-        notebook.add(stats_frame, text="Statistics")
+        notebook.add(stats_frame, text="📊 Stats")
         self._create_statistics_section(stats_frame)
         
         # Risk Management tab
         risk_frame = ttk.Frame(notebook)
-        notebook.add(risk_frame, text="Risk Management")
+        notebook.add(risk_frame, text="⚠️ Risk")
         self._create_risk_management_section(risk_frame)
         
         # Manual Trading tab
         manual_frame = ttk.Frame(notebook)
-        notebook.add(manual_frame, text="Manual Trading")
+        notebook.add(manual_frame, text="🎯 Manual")
         self._create_manual_trading_section(manual_frame)
+        
+        # Quick Actions tab
+        actions_frame = ttk.Frame(notebook)
+        notebook.add(actions_frame, text="⚡ Actions")
+        self._create_quick_actions_section(actions_frame)
+    
+    def _create_quick_stats_section(self, parent: ttk.Frame) -> None:
+        """Create quick stats section that's always visible.
+        
+        Args:
+            parent: Parent frame.
+        """
+        # Create a horizontal layout for key metrics
+        stats_container = ttk.Frame(parent)
+        stats_container.pack(fill=tk.X)
+        
+        # PnL display (most important)
+        pnl_frame = ttk.Frame(stats_container)
+        pnl_frame.pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Label(pnl_frame, text="P&L:", font=('TkDefaultFont', 9)).pack(side=tk.LEFT)
+        self.quick_pnl_label = ttk.Label(
+            pnl_frame, 
+            text="$0.00", 
+            font=('TkDefaultFont', 10, 'bold'),
+            foreground='black'
+        )
+        self.quick_pnl_label.pack(side=tk.LEFT, padx=(5, 0))
+        
+        # Trades count
+        trades_frame = ttk.Frame(stats_container)
+        trades_frame.pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Label(trades_frame, text="Trades:", font=('TkDefaultFont', 9)).pack(side=tk.LEFT)
+        self.quick_trades_label = ttk.Label(
+            trades_frame, 
+            text="0", 
+            font=('TkDefaultFont', 10, 'bold')
+        )
+        self.quick_trades_label.pack(side=tk.LEFT, padx=(5, 0))
+        
+        # Win rate
+        winrate_frame = ttk.Frame(stats_container)
+        winrate_frame.pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Label(winrate_frame, text="Win Rate:", font=('TkDefaultFont', 9)).pack(side=tk.LEFT)
+        self.quick_winrate_label = ttk.Label(
+            winrate_frame, 
+            text="0%", 
+            font=('TkDefaultFont', 10, 'bold')
+        )
+        self.quick_winrate_label.pack(side=tk.LEFT, padx=(5, 0))
+        
+        # Status indicator
+        status_frame = ttk.Frame(stats_container)
+        status_frame.pack(side=tk.RIGHT)
+        
+        self.status_indicator = ttk.Label(
+            status_frame,
+            text="● READY",
+            font=('TkDefaultFont', 9, 'bold'),
+            foreground='orange'
+        )
+        self.status_indicator.pack(side=tk.RIGHT)
+    
+    def _create_quick_actions_section(self, parent: ttk.Frame) -> None:
+        """Create quick actions section.
+        
+        Args:
+            parent: Parent frame.
+        """
+        # Emergency controls
+        emergency_frame = ttk.LabelFrame(parent, text="Emergency Controls", padding=10)
+        emergency_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Close all positions button
+        close_all_btn = ttk.Button(
+            emergency_frame,
+            text="🚨 Close All Positions",
+            command=self._close_all_positions,
+            style="Accent.TButton"
+        )
+        close_all_btn.pack(fill=tk.X, pady=(0, 5))
+        
+        # Cancel all orders button
+        cancel_all_btn = ttk.Button(
+            emergency_frame,
+            text="❌ Cancel All Orders",
+            command=self._cancel_all_orders
+        )
+        cancel_all_btn.pack(fill=tk.X, pady=(0, 5))
+        
+        # Pause trading button
+        self.pause_btn = ttk.Button(
+            emergency_frame,
+            text="⏸️ Pause Trading",
+            command=self._toggle_pause
+        )
+        self.pause_btn.pack(fill=tk.X)
+        
+        # Quick trade section
+        quick_trade_frame = ttk.LabelFrame(parent, text="Quick Trade", padding=10)
+        quick_trade_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Symbol entry
+        symbol_frame = ttk.Frame(quick_trade_frame)
+        symbol_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        ttk.Label(symbol_frame, text="Symbol:").pack(side=tk.LEFT)
+        self.quick_symbol_var = tk.StringVar()
+        symbol_entry = ttk.Entry(
+            symbol_frame,
+            textvariable=self.quick_symbol_var,
+            width=10
+        )
+        symbol_entry.pack(side=tk.LEFT, padx=(5, 0))
+        
+        # Quantity entry
+        ttk.Label(symbol_frame, text="Qty:").pack(side=tk.LEFT, padx=(10, 0))
+        self.quick_qty_var = tk.StringVar(value="100")
+        qty_entry = ttk.Entry(
+            symbol_frame,
+            textvariable=self.quick_qty_var,
+            width=8
+        )
+        qty_entry.pack(side=tk.LEFT, padx=(5, 0))
+        
+        # Buy/Sell buttons
+        buttons_frame = ttk.Frame(quick_trade_frame)
+        buttons_frame.pack(fill=tk.X)
+        
+        buy_btn = ttk.Button(
+            buttons_frame,
+            text="📈 Quick Buy",
+            command=self._quick_buy,
+            style="Accent.TButton"
+        )
+        buy_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
+        
+        sell_btn = ttk.Button(
+            buttons_frame,
+            text="📉 Quick Sell",
+            command=self._quick_sell
+        )
+        sell_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 0))
     
     def _create_statistics_section(self, parent: ttk.Frame) -> None:
         """Create the statistics section.
@@ -596,3 +755,131 @@ class TradingPanel:
             
         except Exception as e:
             self.logger.error(f"Error setting risk parameters: {e}")
+    
+    def _close_all_positions(self) -> None:
+        """Close all open positions."""
+        try:
+            # This would integrate with the trading strategy
+            # For now, just show a confirmation dialog
+            import tkinter.messagebox as msgbox
+            result = msgbox.askyesno(
+                "Confirm Close All",
+                "Are you sure you want to close ALL positions?\n\nThis action cannot be undone.",
+                icon="warning"
+            )
+            if result:
+                # TODO: Implement actual position closing logic
+                self.status_indicator.config(text="● CLOSING ALL", foreground="red")
+                self.logger.info("Closing all positions...")
+        except Exception as e:
+            self.logger.error(f"Error closing positions: {e}")
+    
+    def _cancel_all_orders(self) -> None:
+        """Cancel all pending orders."""
+        try:
+            import tkinter.messagebox as msgbox
+            result = msgbox.askyesno(
+                "Confirm Cancel All",
+                "Are you sure you want to cancel ALL pending orders?",
+                icon="warning"
+            )
+            if result:
+                # TODO: Implement actual order cancellation logic
+                self.status_indicator.config(text="● CANCELING", foreground="red")
+                self.logger.info("Canceling all orders...")
+        except Exception as e:
+            self.logger.error(f"Error canceling orders: {e}")
+    
+    def _toggle_pause(self) -> None:
+        """Toggle trading pause state."""
+        try:
+            current_text = self.pause_btn.cget("text")
+            if "Pause" in current_text:
+                self.pause_btn.config(text="▶️ Resume Trading")
+                self.status_indicator.config(text="● PAUSED", foreground="orange")
+                self.logger.info("Trading paused")
+            else:
+                self.pause_btn.config(text="⏸️ Pause Trading")
+                self.status_indicator.config(text="● ACTIVE", foreground="green")
+                self.logger.info("Trading resumed")
+        except Exception as e:
+            self.logger.error(f"Error toggling pause: {e}")
+    
+    def _quick_buy(self) -> None:
+        """Execute a quick buy order."""
+        try:
+            symbol = self.quick_symbol_var.get().upper().strip()
+            qty_str = self.quick_qty_var.get().strip()
+            
+            if not symbol:
+                import tkinter.messagebox as msgbox
+                msgbox.showerror("Error", "Please enter a symbol")
+                return
+            
+            try:
+                qty = int(qty_str)
+                if qty <= 0:
+                    raise ValueError("Quantity must be positive")
+            except ValueError:
+                import tkinter.messagebox as msgbox
+                msgbox.showerror("Error", "Please enter a valid quantity")
+                return
+            
+            # TODO: Implement actual buy logic
+            self.logger.info(f"Quick buy: {qty} shares of {symbol}")
+            self.status_indicator.config(text="● BUYING", foreground="blue")
+            
+        except Exception as e:
+            self.logger.error(f"Error executing quick buy: {e}")
+    
+    def _quick_sell(self) -> None:
+        """Execute a quick sell order."""
+        try:
+            symbol = self.quick_symbol_var.get().upper().strip()
+            qty_str = self.quick_qty_var.get().strip()
+            
+            if not symbol:
+                import tkinter.messagebox as msgbox
+                msgbox.showerror("Error", "Please enter a symbol")
+                return
+            
+            try:
+                qty = int(qty_str)
+                if qty <= 0:
+                    raise ValueError("Quantity must be positive")
+            except ValueError:
+                import tkinter.messagebox as msgbox
+                msgbox.showerror("Error", "Please enter a valid quantity")
+                return
+            
+            # TODO: Implement actual sell logic
+            self.logger.info(f"Quick sell: {qty} shares of {symbol}")
+            self.status_indicator.config(text="● SELLING", foreground="red")
+            
+        except Exception as e:
+            self.logger.error(f"Error executing quick sell: {e}")
+    
+    def update_quick_stats(self, pnl: float = 0.0, trades: int = 0, win_rate: float = 0.0) -> None:
+        """Update the quick stats display.
+        
+        Args:
+            pnl: Current profit/loss.
+            trades: Total number of trades.
+            win_rate: Win rate percentage.
+        """
+        try:
+            # Update P&L with color coding
+            pnl_text = f"${pnl:,.2f}"
+            pnl_color = "green" if pnl > 0 else "red" if pnl < 0 else "black"
+            self.quick_pnl_label.config(text=pnl_text, foreground=pnl_color)
+            
+            # Update trades count
+            self.quick_trades_label.config(text=str(trades))
+            
+            # Update win rate with color coding
+            win_rate_text = f"{win_rate:.1f}%"
+            win_rate_color = "green" if win_rate >= 60 else "orange" if win_rate >= 40 else "red"
+            self.quick_winrate_label.config(text=win_rate_text, foreground=win_rate_color)
+            
+        except Exception as e:
+            self.logger.error(f"Error updating quick stats: {e}")

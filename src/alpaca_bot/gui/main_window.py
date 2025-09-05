@@ -101,23 +101,35 @@ class MainWindow:
     
     def _create_main_frame(self) -> None:
         """Create the main application frame."""
-        # Create main container with paned window
-        main_paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
-        main_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Create main container with vertical paned window for better layout
+        main_container = ttk.Frame(self.root)
+        main_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Top section with horizontal paned window
+        top_paned = ttk.PanedWindow(main_container, orient=tk.HORIZONTAL)
+        top_paned.pack(fill=tk.BOTH, expand=True)
         
         # Left panel for controls
-        left_frame = ttk.Frame(main_paned)
-        main_paned.add(left_frame, weight=1)
+        left_frame = ttk.Frame(top_paned)
+        top_paned.add(left_frame, weight=1)
         
         # Right panel for displays
-        right_frame = ttk.Frame(main_paned)
-        main_paned.add(right_frame, weight=2)
+        right_frame = ttk.Frame(top_paned)
+        top_paned.add(right_frame, weight=2)
         
         # Create left panel components
         self._create_control_panel(left_frame)
         
         # Create right panel components
         self._create_display_panel(right_frame)
+        
+        # Bottom section for trading panel (more prominent)
+        bottom_frame = ttk.Frame(main_container)
+        bottom_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        # Enhanced trading panel
+        self.trading_panel = TradingPanel(bottom_frame)
+        self.trading_panel.frame.configure(text="🔥 Trading Panel - Quick Access")
     
     def _create_control_panel(self, parent: ttk.Frame) -> None:
         """Create the control panel.
@@ -159,9 +171,6 @@ class MainWindow:
         
         # Stock selection
         self.stock_selector = StockSelectorFrame(parent, self._on_symbols_changed)
-        
-        # Trading panel
-        self.trading_panel = TradingPanel(parent)
         
         # Configuration panel
         from ..config.settings import settings
@@ -840,9 +849,9 @@ class MainWindow:
             # Update strategy parameters if strategy exists
             if self.strategy:
                 for key, value in config.items():
-                    if key == 'aggressive_mode':
-                        # Handle aggressive mode specially
-                        self.strategy.set_aggressive_mode(value)
+                    if key == 'trading_mode':
+                        # Handle trading mode specially
+                        self.strategy.set_trading_mode(value)
                     elif hasattr(self.strategy, key):
                         setattr(self.strategy, key, value)
                         

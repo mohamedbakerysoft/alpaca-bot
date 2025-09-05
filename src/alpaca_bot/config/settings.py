@@ -63,10 +63,10 @@ class Settings:
         )
         
         # Trading Mode
-        self.aggressive_mode: bool = config(
-            "AGGRESSIVE_MODE",
-            default=False,
-            cast=bool
+        self.trading_mode: str = config(
+            "TRADING_MODE",
+            default="conservative",
+            cast=str
         )
         
         # Application Configuration
