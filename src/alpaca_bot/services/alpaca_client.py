@@ -205,14 +205,15 @@ class AlpacaClient:
     def place_order(
         self,
         symbol: str,
-        qty: Union[int, float],
-        side: str,
+        qty: Union[int, float] = None,
+        side: str = None,
         order_type: str = "market",
         time_in_force: str = "day",
         limit_price: Optional[float] = None,
         stop_price: Optional[float] = None,
         trail_price: Optional[float] = None,
-        trail_percent: Optional[float] = None
+        trail_percent: Optional[float] = None,
+        notional: Optional[float] = None
     ) -> Order:
         """Place a trading order.
         
@@ -248,17 +249,31 @@ class AlpacaClient:
             if side not in ["buy", "sell"]:
                 raise ValueError(f"Invalid side: {side}")
             
-            if qty <= 0:
+            if qty is not None and notional is not None:
+                raise ValueError("Cannot specify both qty and notional")
+            
+            if qty is None and notional is None:
+                raise ValueError("Must specify either qty or notional")
+            
+            if qty is not None and qty <= 0:
                 raise ValueError(f"Invalid quantity: {qty}")
+            
+            if notional is not None and notional <= 0:
+                raise ValueError(f"Invalid notional amount: {notional}")
             
             # Build order request
             order_data = {
                 "symbol": symbol,
-                "qty": qty,
                 "side": side,
                 "type": order_type,
                 "time_in_force": time_in_force
             }
+            
+            # Add quantity or notional amount
+            if qty is not None:
+                order_data["qty"] = qty
+            else:
+                order_data["notional"] = notional
             
             if limit_price is not None:
                 order_data["limit_price"] = limit_price
@@ -282,6 +297,37 @@ class AlpacaClient:
         except Exception as e:
             self.error_handler.handle_order_error(e, order_details)
             raise
+    
+    def place_notional_order(
+        self,
+        symbol: str,
+        notional_amount: float,
+        side: str,
+        order_type: str = "market",
+        time_in_force: str = "day"
+    ) -> Order:
+        """Place a notional (dollar-based) order for fractional shares.
+        
+        Args:
+            symbol: Stock symbol.
+            notional_amount: Dollar amount to trade.
+            side: "buy" or "sell".
+            order_type: Order type ("market", "limit", etc.).
+            time_in_force: Time in force ("day", "gtc", etc.).
+            
+        Returns:
+            Order: The placed order.
+            
+        Raises:
+            AlpacaClientError: If order placement fails.
+        """
+        return self.place_order(
+            symbol=symbol,
+            side=side,
+            order_type=order_type,
+            time_in_force=time_in_force,
+            notional=notional_amount
+        )
     
     @retry_on_error(max_retries=2, delay=0.5)
     def cancel_order(self, order_id: str) -> None:

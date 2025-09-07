@@ -39,6 +39,28 @@ class Settings:
             default=True,
             cast=bool
         )
+        self.enable_fractional_shares: bool = config(
+            "ENABLE_FRACTIONAL_SHARES",
+            default=True,
+            cast=bool
+        )
+        self.min_order_value: float = config(
+            "MIN_ORDER_VALUE",
+            default=1.0,
+            cast=float
+        )
+        
+        # Dynamic parameter adjustment
+        self.enable_dynamic_parameters: bool = config(
+            "ENABLE_DYNAMIC_PARAMETERS",
+            default=True,
+            cast=bool
+        )
+        self.parameter_refresh_frequency: int = config(
+            "PARAMETER_REFRESH_FREQUENCY",
+            default=10,
+            cast=int
+        )
         
         # Strategy Parameters
         self.default_position_size: float = config(

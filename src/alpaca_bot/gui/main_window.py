@@ -167,8 +167,21 @@ class MainWindow:
         account_frame = ttk.LabelFrame(parent, text="Account Info", padding=10)
         account_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        self.account_info = ttk.Label(account_frame, text="Not connected")
-        self.account_info.pack(anchor=tk.W)
+        # Account info with explanations
+        account_info_frame = ttk.Frame(account_frame)
+        account_info_frame.pack(fill=tk.X)
+        
+        self.account_info = ttk.Label(account_info_frame, text="Not connected")
+        self.account_info.pack(side=tk.LEFT, anchor=tk.W)
+        
+        # Help button for account info explanation
+        help_button = ttk.Button(
+            account_info_frame,
+            text="?",
+            width=3,
+            command=self._show_account_info_help
+        )
+        help_button.pack(side=tk.RIGHT, padx=(10, 0))
         
         # Stock selection
         self.stock_selector = StockSelectorFrame(parent, self._on_symbols_changed)
@@ -938,6 +951,19 @@ class MainWindow:
     def _show_performance(self) -> None:
         """Show performance dialog."""
         messagebox.showinfo("Performance", "Performance dialog not implemented yet.")
+    
+    def _show_account_info_help(self) -> None:
+        """Show account info help dialog."""
+        help_text = (
+            "Account Information Explanation:\n\n"
+            "• Buying Power: The amount of money available to purchase securities. "
+            "This includes cash plus the maximum amount you can borrow on margin.\n\n"
+            "• Portfolio Value: The total current market value of all your holdings, "
+            "including stocks, cash, and other assets in your account.\n\n"
+            "Note: Buying Power can be higher than Portfolio Value if you have "
+            "margin trading enabled, as it includes potential borrowed funds."
+        )
+        messagebox.showinfo("Account Info Help", help_text)
     
     def _show_about(self) -> None:
         """Show about dialog."""

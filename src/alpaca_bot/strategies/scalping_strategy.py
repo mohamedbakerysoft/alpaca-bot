@@ -37,6 +37,114 @@ class TradingMode(Enum):
     ULTRA_SAFE = "ultra_safe"
     CONSERVATIVE = "conservative"
     AGGRESSIVE = "aggressive"
+    
+    @classmethod
+    def get_mode_params(cls, mode: 'TradingMode', portfolio_value: float = None) -> Dict[str, float]:
+        """Get trading parameters for each mode, dynamically adjusted based on portfolio value.
+        
+        Args:
+            mode: Trading mode.
+            portfolio_value: Current portfolio value for dynamic adjustment.
+            
+        Returns:
+            Dictionary with mode-specific parameters adjusted for account size.
+        """
+        # Base parameters for each mode
+        base_params = {
+            cls.ULTRA_SAFE: {
+                'position_size_multiplier': 0.3,
+                'stop_loss_pct': 0.005,
+                'take_profit_pct': 0.01,
+                'max_daily_trades': 3,
+                'min_rsi_oversold': 25,
+                'max_rsi_overbought': 75,
+                'volatility_threshold': 0.02,
+                'min_volume': 1000000,
+                'max_position_value_pct': 0.25,  # 25% of portfolio
+            },
+            cls.CONSERVATIVE: {
+                'position_size_multiplier': 0.5,
+                'stop_loss_pct': 0.01,
+                'take_profit_pct': 0.02,
+                'max_daily_trades': 5,
+                'min_rsi_oversold': 30,
+                'max_rsi_overbought': 70,
+                'volatility_threshold': 0.03,
+                'min_volume': 500000,
+                'max_position_value_pct': 0.4,  # 40% of portfolio
+            },
+            cls.AGGRESSIVE: {
+                'position_size_multiplier': 1.0,
+                'stop_loss_pct': 0.015,
+                'take_profit_pct': 0.03,
+                'max_daily_trades': 15,
+                'min_rsi_oversold': 35,
+                'max_rsi_overbought': 65,
+                'volatility_threshold': 0.05,
+                'min_volume': 250000,
+                'max_position_value_pct': 0.6,  # 60% of portfolio
+            }
+        }
+        
+        params = base_params[mode].copy()
+        
+        # Dynamic adjustments based on portfolio value
+        if portfolio_value is not None:
+            # Calculate max position value based on portfolio percentage
+            max_position_value = portfolio_value * params['max_position_value_pct']
+            
+            # Account size tiers with different strategies
+            if portfolio_value <= 100:  # Small accounts ($100 or less)
+                # More conservative for very small accounts
+                params['position_size_multiplier'] *= 0.7
+                params['max_daily_trades'] = min(params['max_daily_trades'], 5)
+                max_position_value = min(max_position_value, 15.0)  # Max $15 per trade
+                
+            elif portfolio_value <= 500:  # Small accounts ($100-$500)
+                params['position_size_multiplier'] *= 0.8
+                max_position_value = min(max_position_value, 50.0)  # Max $50 per trade
+                
+            elif portfolio_value <= 1000:  # Medium small accounts ($500-$1000)
+                params['position_size_multiplier'] *= 0.9
+                max_position_value = min(max_position_value, 100.0)  # Max $100 per trade
+                
+            elif portfolio_value <= 5000:  # Medium accounts ($1000-$5000)
+                # Standard multipliers
+                max_position_value = min(max_position_value, 500.0)  # Max $500 per trade
+                
+            elif portfolio_value <= 25000:  # Large accounts ($5000-$25000)
+                # Slightly more aggressive for larger accounts
+                params['position_size_multiplier'] *= 1.1
+                if mode == cls.AGGRESSIVE:
+                    params['max_daily_trades'] = min(params['max_daily_trades'] + 5, 25)
+                max_position_value = min(max_position_value, 2500.0)  # Max $2500 per trade
+                
+            else:  # Very large accounts ($25000+)
+                # More aggressive for very large accounts
+                params['position_size_multiplier'] *= 1.2
+                if mode == cls.AGGRESSIVE:
+                    params['max_daily_trades'] = min(params['max_daily_trades'] + 10, 35)
+                    # Allow higher volatility tolerance for large accounts
+                    params['volatility_threshold'] *= 1.2
+                    # More aggressive RSI levels
+                    params['min_rsi_oversold'] = max(params['min_rsi_oversold'] - 5, 25)
+                    params['max_rsi_overbought'] = min(params['max_rsi_overbought'] + 5, 75)
+            
+            # Set the calculated max position value
+            params['max_position_value'] = max(max_position_value, 1.0)  # Minimum $1
+            
+            # Remove the percentage key as it's no longer needed
+            del params['max_position_value_pct']
+        else:
+            # Fallback to fixed values if portfolio_value is not provided
+            params['max_position_value'] = {
+                cls.ULTRA_SAFE: 25.0,
+                cls.CONSERVATIVE: 100.0,
+                cls.AGGRESSIVE: 500.0
+            }[mode]
+            del params['max_position_value_pct']
+        
+        return params
 
 
 class ScalpingStrategy:
@@ -55,6 +163,7 @@ class ScalpingStrategy:
         self.error_handler = ErrorHandler(self.logger)
         self.account_update_callback = account_update_callback
         self.order_update_callback = order_update_callback
+        self.settings = settings  # Add settings reference for dynamic parameter updates
         
         # Strategy parameters from settings
         self.support_threshold = settings.support_threshold
@@ -89,46 +198,51 @@ class ScalpingStrategy:
         self.price_data_cache: Dict[str, StockData] = {}
         self.last_update: Dict[str, datetime] = {}
         
+        # Dynamic parameter tracking
+        self._last_portfolio_value = None
+        
         self.logger.info("Scalping strategy initialized")
     
     def _update_trading_mode_parameters(self) -> None:
-        """Update strategy parameters based on trading mode."""
+        """Update strategy parameters based on trading mode with dynamic adjustment."""
+        # Get portfolio value for dynamic parameter calculation
+        try:
+            account = self.alpaca_client.get_account()
+            portfolio_value = float(account.portfolio_value) if account and hasattr(account, 'portfolio_value') else 1000.0
+        except Exception:
+            portfolio_value = 1000.0  # Default fallback
+        
+        # Get dynamic mode parameters
+        mode_params = TradingMode.get_mode_params(self.trading_mode, portfolio_value)
+        
+        # Apply dynamic parameters
+        self.stop_loss_pct = mode_params['stop_loss_pct']
+        self.take_profit_pct = mode_params['take_profit_pct']
+        self.rsi_oversold = mode_params['min_rsi_oversold']
+        self.rsi_overbought = mode_params['max_rsi_overbought']
+        
+        # Set mode-specific parameters
         if self.trading_mode == TradingMode.ULTRA_SAFE:
-            # Ultra-safe parameters for maximum capital preservation
-            self.rsi_oversold = 25.0  # Very oversold threshold
-            self.rsi_overbought = 75.0  # Very overbought threshold
             self.support_threshold = 0.015  # Wider support threshold (1.5%)
             self.resistance_threshold = 0.015  # Wider resistance threshold (1.5%)
-            self.take_profit_pct = 0.015  # Lower take profit (1.5%)
-            self.stop_loss_pct = 0.008  # Very tight stop loss (0.8%)
             self.trailing_stop_pct = 0.012  # Wider trailing stop (1.2%)
             self.min_profit_for_trailing = 0.008  # Higher threshold for trailing (0.8%)
             self.min_buy_score = 4  # Require higher confidence
-            self.logger.info("Ultra-safe mode enabled - using maximum safety parameters")
+            self.logger.info(f"Ultra-safe mode enabled - Portfolio: ${portfolio_value:.2f}, Max position: ${mode_params['max_position_value']:.2f}")
         elif self.trading_mode == TradingMode.AGGRESSIVE:
-            # More aggressive parameters for higher risk/reward
-            self.rsi_oversold = 35.0  # Less oversold threshold
-            self.rsi_overbought = 65.0  # Less overbought threshold
             self.support_threshold = 0.005  # Tighter support threshold (0.5%)
             self.resistance_threshold = 0.005  # Tighter resistance threshold (0.5%)
-            self.take_profit_pct = 0.025  # Higher take profit (2.5%)
-            self.stop_loss_pct = 0.012  # Tighter stop loss (1.2%)
             self.trailing_stop_pct = 0.008  # Tighter trailing stop (0.8%)
             self.min_profit_for_trailing = 0.003  # Lower threshold for trailing (0.3%)
             self.min_buy_score = 2  # Lower confidence requirement
-            self.logger.info("Aggressive mode enabled - using higher risk parameters")
+            self.logger.info(f"Aggressive mode enabled - Portfolio: ${portfolio_value:.2f}, Max position: ${mode_params['max_position_value']:.2f}, Max trades: {mode_params['max_daily_trades']}")
         else:  # CONSERVATIVE
-            # Conservative parameters (default)
-            self.rsi_oversold = getattr(settings, 'rsi_oversold', 30.0)
-            self.rsi_overbought = getattr(settings, 'rsi_overbought', 70.0)
-            self.support_threshold = settings.support_threshold
-            self.resistance_threshold = settings.resistance_threshold
-            self.take_profit_pct = getattr(settings, 'take_profit_percentage', 0.02)
-            self.stop_loss_pct = settings.stop_loss_percentage
+            self.support_threshold = getattr(self.settings, 'support_threshold', 0.01)
+            self.resistance_threshold = getattr(self.settings, 'resistance_threshold', 0.01)
             self.trailing_stop_pct = 0.01  # Standard trailing stop (1%)
             self.min_profit_for_trailing = 0.005  # Standard threshold for trailing (0.5%)
             self.min_buy_score = 3  # Standard confidence requirement
-            self.logger.info("Conservative mode enabled - using standard risk parameters")
+            self.logger.info(f"Conservative mode enabled - Portfolio: ${portfolio_value:.2f}, Max position: ${mode_params['max_position_value']:.2f}")
     
     def set_trading_mode(self, mode: TradingMode) -> None:
         """Set trading mode and update parameters.
@@ -138,6 +252,28 @@ class ScalpingStrategy:
         """
         self.trading_mode = mode
         self._update_trading_mode_parameters()
+        self.logger.info(f"Trading mode changed to {mode.value}")
+    
+    def refresh_dynamic_parameters(self) -> None:
+        """Refresh trading parameters based on current portfolio value.
+        Should be called periodically to adjust parameters as account grows/shrinks.
+        """
+        # Get current portfolio value
+        try:
+            account = self.alpaca_client.get_account()
+            current_portfolio_value = float(account.portfolio_value) if account and hasattr(account, 'portfolio_value') else 1000.0
+        except Exception:
+            current_portfolio_value = 1000.0
+        
+        # Check if portfolio value changed significantly (>20%)
+        if hasattr(self, '_last_portfolio_value'):
+            change_pct = abs(current_portfolio_value - self._last_portfolio_value) / self._last_portfolio_value
+            if change_pct > 0.20:  # 20% change threshold
+                self.logger.info(f"Significant portfolio change detected: {change_pct:.1%} - Updating parameters")
+        
+        self._last_portfolio_value = current_portfolio_value
+        self._update_trading_mode_parameters()
+        self.logger.info(f"Dynamic trading parameters refreshed - Portfolio: ${current_portfolio_value:.2f}")
     
     def analyze_symbol(self, symbol: str, timeframe: str = '1Min', 
                       lookback_periods: int = 100) -> Optional[StockData]:
@@ -151,6 +287,14 @@ class ScalpingStrategy:
         Returns:
             StockData: Stock data with technical analysis, or None if error.
         """
+        # Refresh dynamic parameters periodically if enabled
+        if self.settings.enable_dynamic_parameters:
+            if not hasattr(self, '_analysis_count'):
+                self._analysis_count = 0
+            self._analysis_count += 1
+            if self._analysis_count % self.settings.parameter_refresh_frequency == 0:
+                self.refresh_dynamic_parameters()
+        
         def _perform_analysis():
             # Check cache freshness
             now = datetime.now()
@@ -380,7 +524,7 @@ class ScalpingStrategy:
         )
     
     def _execute_buy_order(self, symbol: str, reason: str) -> Optional[Trade]:
-        """Execute a buy order.
+        """Execute a buy order using notional amount for fractional shares.
         
         Args:
             symbol: Stock symbol.
@@ -395,6 +539,12 @@ class ScalpingStrategy:
             if not quote:
                 raise MarketDataError(f"Could not get quote for {symbol}")
             
+            # Get portfolio value for dynamic parameter calculation
+            portfolio_value = float(account.portfolio_value) if hasattr(account, 'portfolio_value') else buying_power
+            
+            # Get current trading mode parameters with dynamic adjustment
+            mode_params = TradingMode.get_mode_params(self.trading_mode, portfolio_value)
+            
             # Calculate dynamic position size
             account = self.alpaca_client.get_account()
             if not account:
@@ -402,18 +552,20 @@ class ScalpingStrategy:
             
             buying_power = float(account.buying_power)
             
-            # Get dynamic position size based on volatility and market conditions
-            dynamic_position_size = self._calculate_dynamic_position_size(symbol, quote['ask'], buying_power)
-            max_position_value = min(dynamic_position_size, buying_power * 0.95)  # Use 95% of buying power as max
-            quantity = int(max_position_value / quote['ask'])
+            # Calculate position value based on mode and available funds
+            max_position_value = min(
+                buying_power * 0.95 * mode_params['position_size_multiplier'],
+                mode_params['max_position_value'],
+                buying_power * 0.1  # Never use more than 10% of buying power per trade
+            )
             
-            if quantity <= 0:
-                raise OrderExecutionError(f"Insufficient buying power for {symbol}")
+            if max_position_value < 1.0:  # Minimum $1 order
+                raise OrderExecutionError(f"Insufficient buying power for {symbol}. Required: $1, Available: ${buying_power}")
             
-            # Place market buy order
-            order = self.alpaca_client.place_order(
+            # Use notional order for fractional shares
+            order = self.alpaca_client.place_notional_order(
                 symbol=symbol,
-                qty=quantity,
+                notional_amount=max_position_value,
                 side='buy',
                 order_type='market',
                 time_in_force='day'
@@ -422,11 +574,14 @@ class ScalpingStrategy:
             if not order:
                 raise OrderExecutionError(f"Failed to place buy order for {symbol}")
             
+            # Calculate approximate quantity for tracking
+            approx_quantity = max_position_value / quote['ask']
+            
             # Create trade object
             trade = Trade(
                 symbol=symbol,
                 trade_type=TradeType.BUY,
-                quantity=quantity,
+                quantity=approx_quantity,
                 price=quote['ask'],
                 timestamp=datetime.now(),
                 order_id=order.id,
@@ -438,10 +593,10 @@ class ScalpingStrategy:
             self.pending_orders[symbol] = order.id
             
             trade_logger.log_order_placed(
-                symbol, 'buy', quantity, 'market', order_id=order.id
+                symbol, 'buy', approx_quantity, 'market', order_id=order.id
             )
             
-            self.logger.info(f"Buy order placed for {symbol}: {quantity} shares")
+            self.logger.info(f"Buy order placed for {symbol}: ${max_position_value:.2f} (~{approx_quantity:.4f} shares) [Portfolio: ${portfolio_value:.2f}]")
             
             # Trigger account update callback if available
             if self.account_update_callback:
