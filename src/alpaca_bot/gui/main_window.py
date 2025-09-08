@@ -185,10 +185,6 @@ class MainWindow:
         
         # Stock selection
         self.stock_selector = StockSelectorFrame(parent, self._on_symbols_changed)
-        
-        # Configuration panel
-        from ..config.settings import settings
-        self.config_panel = ConfigPanel(parent, settings, self._on_config_changed)
     
     def _create_display_panel(self, parent: ttk.Frame) -> None:
         """Create the display panel.
@@ -219,6 +215,10 @@ class MainWindow:
         orders_frame = ttk.Frame(notebook)
         notebook.add(orders_frame, text="Orders")
         self._create_orders_display(orders_frame)
+        
+        # Configuration panel
+        from ..config.settings import settings
+        self.config_panel = ConfigPanel(notebook, settings, self._on_config_changed)
     
     def _create_log_display(self, parent: ttk.Frame) -> None:
         """Create the log display.

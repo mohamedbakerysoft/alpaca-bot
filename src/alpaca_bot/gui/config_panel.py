@@ -26,7 +26,7 @@ class ConfigPanel:
         """Initialize the configuration panel.
         
         Args:
-            parent: Parent widget.
+            parent: Parent widget (can be a notebook or regular frame).
             settings: Settings instance.
             on_settings_change: Callback for when settings change.
         """
@@ -34,9 +34,16 @@ class ConfigPanel:
         self.settings = settings
         self.on_settings_change = on_settings_change
         
-        # Create main frame
-        self.frame = ttk.LabelFrame(parent, text="Configuration", padding=10)
-        self.frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Check if parent is a notebook
+        self.is_notebook_parent = isinstance(parent, ttk.Notebook)
+        
+        if self.is_notebook_parent:
+            # Parent is a notebook, we'll add tabs directly to it
+            self.notebook = parent
+        else:
+            # Create main frame for standalone use
+            self.frame = ttk.LabelFrame(parent, text="Configuration", padding=10)
+            self.frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Create custom styles for visual indicators
         self.style = ttk.Style()
@@ -122,9 +129,10 @@ class ConfigPanel:
     
     def _create_widgets(self) -> None:
         """Create the configuration widgets."""
-        # Create notebook for different configuration sections
-        self.notebook = ttk.Notebook(self.frame)
-        self.notebook.pack(fill=tk.BOTH, expand=True)
+        if not self.is_notebook_parent:
+            # Create notebook for different configuration sections
+            self.notebook = ttk.Notebook(self.frame)
+            self.notebook.pack(fill=tk.BOTH, expand=True)
         
         # Strategy tab
         self._create_strategy_tab()
@@ -144,8 +152,9 @@ class ConfigPanel:
         # Logging tab
         self._create_logging_tab()
         
-        # Control buttons
-        self._create_control_buttons()
+        # Control buttons (only for standalone mode)
+        if not self.is_notebook_parent:
+            self._create_control_buttons()
     
     def _create_strategy_tab(self) -> None:
         """Create strategy parameters tab."""
