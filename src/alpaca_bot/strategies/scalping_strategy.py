@@ -202,7 +202,74 @@ class ScalpingStrategy:
         # Dynamic parameter tracking
         self._last_portfolio_value = None
         
+        # Recover existing positions and orders from Alpaca API
+        self._recover_existing_state()
+        
         self.logger.info("Scalping strategy initialized")
+    
+    def _recover_existing_state(self) -> None:
+        """Recover existing positions and orders from Alpaca API on startup."""
+        def _recover_state():
+            recovered_positions = 0
+            recovered_orders = 0
+            
+            try:
+                # Recover existing positions from Alpaca
+                positions = self.alpaca_client.get_positions()
+                for position in positions:
+                    if float(position.qty) != 0:  # Only active positions
+                        # Create Trade object from Alpaca position
+                        trade = Trade(
+                            symbol=position.symbol,
+                            trade_type=TradeType.BUY if float(position.qty) > 0 else TradeType.SELL,
+                            quantity=abs(float(position.qty)),
+                            price=float(position.avg_entry_price),
+                            timestamp=datetime.now(),  # We don't have original timestamp
+                            order_id=None,  # Position doesn't have order_id
+                            status=TradeStatus.FILLED,
+                            notes="Recovered from Alpaca API on startup"
+                        )
+                        
+                        self.active_positions[position.symbol] = trade
+                        
+                        # Initialize high price for trailing stops
+                        try:
+                            quote = self.alpaca_client.get_latest_quote(position.symbol)
+                            current_price = quote['bid'] if quote else float(position.avg_entry_price)
+                            self.position_high_prices[position.symbol] = current_price
+                        except Exception as e:
+                            self.logger.warning(f"Failed to get current price for {position.symbol}: {e}")
+                            self.position_high_prices[position.symbol] = float(position.avg_entry_price)
+                        
+                        recovered_positions += 1
+                        self.logger.info(f"Recovered position: {position.symbol} - {position.qty} shares at ${position.avg_entry_price}")
+                
+                # Recover pending orders from Alpaca
+                orders = self.alpaca_client.get_orders(status="open", limit=100)
+                for order in orders:
+                    if order.status in ['new', 'partially_filled', 'pending_new', 'accepted']:
+                        self.pending_orders[order.symbol] = order.id
+                        recovered_orders += 1
+                        self.logger.info(f"Recovered pending order: {order.symbol} - {order.side} {order.qty} shares (Order ID: {order.id})")
+                
+                self.logger.info(f"State recovery completed: {recovered_positions} positions, {recovered_orders} pending orders")
+                
+                # Trigger GUI updates if positions or orders were recovered
+                if recovered_positions > 0 or recovered_orders > 0:
+                    if self.account_update_callback:
+                        self.account_update_callback()
+                    if self.order_update_callback:
+                        self.order_update_callback()
+                
+            except Exception as e:
+                self.logger.error(f"Failed to recover existing state: {e}")
+                # Continue with empty state if recovery fails
+        
+        safe_execute(
+            _recover_state,
+            default_return=None,
+            log_errors=True
+        )
     
     def _update_trading_mode_parameters(self) -> None:
         """Update strategy parameters based on trading mode with dynamic adjustment."""
