@@ -311,8 +311,15 @@ class ScalpingStrategy:
         """Update strategy parameters based on trading mode with dynamic adjustment."""
         # Get portfolio value for dynamic parameter calculation
         try:
-            account = self.alpaca_client.get_account()
-            portfolio_value = float(account.portfolio_value) if account and hasattr(account, 'portfolio_value') else 1000.0
+            # Check if custom portfolio value is enabled
+            if (hasattr(self.settings, 'custom_portfolio_value_enabled') and 
+                self.settings.custom_portfolio_value_enabled and
+                hasattr(self.settings, 'custom_portfolio_value')):
+                portfolio_value = float(self.settings.custom_portfolio_value)
+                self.logger.info(f"Using custom portfolio value: ${portfolio_value:.2f}")
+            else:
+                account = self.alpaca_client.get_account()
+                portfolio_value = float(account.portfolio_value) if account and hasattr(account, 'portfolio_value') else 1000.0
         except Exception:
             portfolio_value = 1000.0  # Default fallback
         
@@ -364,8 +371,14 @@ class ScalpingStrategy:
         """
         # Get current portfolio value
         try:
-            account = self.alpaca_client.get_account()
-            current_portfolio_value = float(account.portfolio_value) if account and hasattr(account, 'portfolio_value') else 1000.0
+            # Check if custom portfolio value is enabled
+            if (hasattr(self.settings, 'custom_portfolio_value_enabled') and 
+                self.settings.custom_portfolio_value_enabled and
+                hasattr(self.settings, 'custom_portfolio_value')):
+                current_portfolio_value = float(self.settings.custom_portfolio_value)
+            else:
+                account = self.alpaca_client.get_account()
+                current_portfolio_value = float(account.portfolio_value) if account and hasattr(account, 'portfolio_value') else 1000.0
         except Exception:
             current_portfolio_value = 1000.0
         
@@ -681,7 +694,12 @@ class ScalpingStrategy:
                 raise MarketDataError(f"Could not get quote for {symbol}")
             
             # Get portfolio value for dynamic parameter calculation
-            portfolio_value = float(account.portfolio_value) if hasattr(account, 'portfolio_value') else available_funds
+            if (hasattr(self.settings, 'custom_portfolio_value_enabled') and 
+                self.settings.custom_portfolio_value_enabled and
+                hasattr(self.settings, 'custom_portfolio_value')):
+                portfolio_value = float(self.settings.custom_portfolio_value)
+            else:
+                portfolio_value = float(account.portfolio_value) if hasattr(account, 'portfolio_value') else available_funds
             
             # Check if fixed trade amount is enabled
             if getattr(self.settings, 'fixed_trade_amount_enabled', False):

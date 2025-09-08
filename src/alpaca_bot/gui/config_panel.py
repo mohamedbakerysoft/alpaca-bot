@@ -92,6 +92,10 @@ class ConfigPanel:
             'fixed_trade_amount_enabled': tk.BooleanVar(value=False),
             'fixed_trade_amount': tk.DoubleVar(value=100.0),
             
+            # Custom Portfolio Value Feature
+            'custom_portfolio_value_enabled': tk.BooleanVar(value=False),
+            'custom_portfolio_value': tk.DoubleVar(value=10000.0),
+            
             # Risk management
             'stop_loss_percent': tk.DoubleVar(value=2.0),
             'take_profit_percent': tk.DoubleVar(value=3.0),
@@ -301,6 +305,42 @@ class ConfigPanel:
         # Update status indicator when checkbox changes
         self.config_vars['fixed_trade_amount_enabled'].trace('w', lambda *args: self._update_fixed_amount_status())
         self._update_fixed_amount_status()  # Initial update
+        
+        # Custom Portfolio Value Feature
+        self.portfolio_value_frame = ttk.LabelFrame(position_frame, text="Custom Portfolio Value", padding=5)
+        self.portfolio_value_frame.grid(row=6, column=0, columnspan=3, sticky=tk.EW, padx=5, pady=5)
+        
+        # Enable/Disable checkbox
+        portfolio_value_check = ttk.Checkbutton(
+            self.portfolio_value_frame,
+            text="Enable Custom Portfolio Value",
+            variable=self.config_vars['custom_portfolio_value_enabled']
+        )
+        portfolio_value_check.grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
+        
+        # Custom portfolio value input
+        ttk.Label(self.portfolio_value_frame, text="Portfolio Value ($):").grid(row=1, column=0, sticky=tk.W, padx=5, pady=2)
+        self.portfolio_value_entry = ttk.Entry(
+            self.portfolio_value_frame,
+            textvariable=self.config_vars['custom_portfolio_value'],
+            width=15
+        )
+        self.portfolio_value_entry.grid(row=1, column=1, sticky=tk.W, padx=5, pady=2)
+        
+        # Add validation to the portfolio value entry
+        self.config_vars['custom_portfolio_value'].trace('w', self._validate_custom_portfolio_value)
+        
+        # Status indicator
+        self.portfolio_value_status = ttk.Label(
+            self.portfolio_value_frame,
+            text="Using Real Portfolio Value",
+            foreground="gray"
+        )
+        self.portfolio_value_status.grid(row=1, column=2, sticky=tk.W, padx=10, pady=2)
+        
+        # Update status indicator when checkbox changes
+        self.config_vars['custom_portfolio_value_enabled'].trace('w', lambda *args: self._update_portfolio_value_status())
+        self._update_portfolio_value_status()  # Initial update
         
         # Risk limits section
         limits_frame = ttk.LabelFrame(risk_frame, text="Risk Limits", padding=10)
@@ -624,6 +664,39 @@ class ConfigPanel:
             )
             return False
     
+    def _validate_custom_portfolio_value(self, *args) -> bool:
+        """Validate the custom portfolio value.
+        
+        Returns:
+            True if valid, False otherwise.
+        """
+        try:
+            value = self.config_vars['custom_portfolio_value'].get()
+            min_value = getattr(self.settings, 'min_portfolio_value', 100.0)
+            max_value = getattr(self.settings, 'max_portfolio_value', 1000000.0)
+            
+            if value < min_value:
+                messagebox.showerror(
+                    "Invalid Portfolio Value", 
+                    f"Portfolio value must be at least ${min_value:.2f}"
+                )
+                return False
+            elif value > max_value:
+                messagebox.showerror(
+                    "Invalid Portfolio Value", 
+                    f"Portfolio value cannot exceed ${max_value:.2f}"
+                )
+                return False
+            
+            return True
+            
+        except (ValueError, tk.TclError):
+            messagebox.showerror(
+                "Invalid Portfolio Value", 
+                "Please enter a valid numeric value"
+            )
+            return False
+    
     def _update_fixed_amount_status(self) -> None:
         """Update visual indicators when fixed amount feature is toggled."""
         is_enabled = self.config_vars['fixed_trade_amount_enabled'].get()
@@ -683,6 +756,58 @@ class ConfigPanel:
         if self.on_settings_change:
             config_dict = self._get_current_config()
             self.on_settings_change(config_dict)
+    
+    def _update_portfolio_value_status(self) -> None:
+        """Update visual indicators when custom portfolio value feature is toggled."""
+        is_enabled = self.config_vars['custom_portfolio_value_enabled'].get()
+        
+        if is_enabled:
+            # Update frame title to show active state
+            if hasattr(self, 'portfolio_value_frame'):
+                self.portfolio_value_frame.config(text="Custom Portfolio Value - ACTIVE")
+            
+            # Update status indicator to show active state
+            self.portfolio_value_status.config(
+                text="ACTIVE",
+                foreground="green",
+                font=('TkDefaultFont', 9, 'bold')
+            )
+            
+            # Highlight the entry field
+            if hasattr(self, 'portfolio_value_entry'):
+                self.portfolio_value_entry.config(style='Active.TEntry')
+            
+            # Show current portfolio value in status
+            try:
+                value = self.config_vars['custom_portfolio_value'].get()
+                if value > 0:
+                    self.portfolio_value_status.config(text=f"ACTIVE (${value:,.2f})")
+            except (ValueError, tk.TclError):
+                pass
+                
+            self.logger.info("Custom portfolio value feature activated")
+        else:
+            # Update frame title to show inactive state
+            if hasattr(self, 'portfolio_value_frame'):
+                self.portfolio_value_frame.config(text="Custom Portfolio Value")
+            
+            # Update status indicator to show inactive state
+            self.portfolio_value_status.config(
+                text="Using Real Portfolio Value",
+                foreground="gray",
+                font=('TkDefaultFont', 9, 'normal')
+            )
+            
+            # Reset entry field styling
+            if hasattr(self, 'portfolio_value_entry'):
+                self.portfolio_value_entry.config(style='TEntry')
+                
+            self.logger.info("Custom portfolio value feature deactivated")
+        
+        # Notify of settings change without saving
+        if self.on_settings_change:
+            config_dict = self._get_current_config()
+            self.on_settings_change(config_dict)
      
     def _load_settings(self) -> None:
         """Load settings from the settings instance."""
@@ -711,6 +836,10 @@ class ConfigPanel:
                 # Fixed Trade Amount Feature
                 'fixed_trade_amount_enabled': 'fixed_trade_amount_enabled',
                 'fixed_trade_amount': 'fixed_trade_amount',
+                
+                # Custom Portfolio Value Feature
+                'custom_portfolio_value_enabled': 'custom_portfolio_value_enabled',
+                'custom_portfolio_value': 'custom_portfolio_value',
                 
                 # Risk management
                 'stop_loss_percent': 'STOP_LOSS_PERCENT',

@@ -113,6 +113,28 @@ class Settings:
             cast=str
         )
         
+        # Portfolio Management
+        self.custom_portfolio_value_enabled: bool = config(
+            "CUSTOM_PORTFOLIO_VALUE_ENABLED",
+            default=False,
+            cast=bool
+        )
+        self.custom_portfolio_value: float = config(
+            "CUSTOM_PORTFOLIO_VALUE",
+            default=10000.0,
+            cast=float
+        )
+        self.min_portfolio_value: float = config(
+            "MIN_PORTFOLIO_VALUE",
+            default=100.0,
+            cast=float
+        )
+        self.max_portfolio_value: float = config(
+            "MAX_PORTFOLIO_VALUE",
+            default=1000000.0,
+            cast=float
+        )
+        
         # Application Configuration
         self.log_level: str = config(
             "LOG_LEVEL",
