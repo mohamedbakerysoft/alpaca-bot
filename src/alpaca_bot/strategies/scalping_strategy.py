@@ -195,6 +195,9 @@ class ScalpingStrategy:
         self.pending_orders: Dict[str, str] = {}  # symbol -> order_id
         self.position_high_prices: Dict[str, float] = {}  # Track highest price for trailing stops
         
+        # Fixed amount capital tracking
+        self._total_allocated_capital = 0.0  # Track total capital allocated from fixed amount
+        
         # Price data cache
         self.price_data_cache: Dict[str, StockData] = {}
         self.last_update: Dict[str, datetime] = {}
@@ -270,6 +273,24 @@ class ScalpingStrategy:
             default_return=None,
             log_errors=True
         )
+    
+    def _calculate_allocated_capital(self) -> float:
+        """Calculate total capital currently allocated from active positions.
+        
+        Returns:
+            float: Total allocated capital from active positions.
+        """
+        total_allocated = 0.0
+        
+        for symbol, trade in self.active_positions.items():
+            if trade.trade_type == TradeType.BUY and trade.status == TradeStatus.FILLED:
+                # Calculate position value: quantity * entry price
+                position_value = trade.quantity * trade.price
+                total_allocated += position_value
+                self.logger.debug(f"Position {symbol}: {trade.quantity:.4f} shares @ ${trade.price:.2f} = ${position_value:.2f}")
+        
+        self.logger.debug(f"Total allocated capital: ${total_allocated:.2f}")
+        return total_allocated
     
     def _update_trading_mode_parameters(self) -> None:
         """Update strategy parameters based on trading mode with dynamic adjustment."""
@@ -649,9 +670,29 @@ class ScalpingStrategy:
             
             # Check if fixed trade amount is enabled
             if getattr(self.settings, 'fixed_trade_amount_enabled', False):
-                # Use fixed trade amount when enabled
-                max_position_value = getattr(self.settings, 'fixed_trade_amount', 100.0)
-                self.logger.info(f"{symbol}: Using fixed trade amount: ${max_position_value:.2f}")
+                # Fixed amount represents total trading capital
+                fixed_total_capital = getattr(self.settings, 'fixed_trade_amount', 100.0)
+                
+                # Calculate currently allocated capital from active positions
+                current_allocated = self._calculate_allocated_capital()
+                
+                # Calculate remaining capital available for new trades
+                remaining_capital = fixed_total_capital - current_allocated
+                
+                # Individual trade is capped at $10 maximum
+                max_individual_trade = 10.0
+                
+                # Determine position value: minimum of remaining capital and max individual trade
+                max_position_value = min(remaining_capital, max_individual_trade)
+                
+                # Ensure minimum trade amount of $1
+                if max_position_value < 1.0:
+                    if remaining_capital <= 0:
+                        raise OrderExecutionError(f"Fixed capital fully allocated. Total: ${fixed_total_capital:.2f}, Allocated: ${current_allocated:.2f}, Remaining: ${remaining_capital:.2f}")
+                    else:
+                        raise OrderExecutionError(f"Insufficient remaining capital for minimum trade. Remaining: ${remaining_capital:.2f}, Required: $1.00")
+                
+                self.logger.info(f"{symbol}: Fixed capital mode - Total: ${fixed_total_capital:.2f}, Allocated: ${current_allocated:.2f}, Remaining: ${remaining_capital:.2f}, Trade size: ${max_position_value:.2f}")
             else:
                 # Get current trading mode parameters with dynamic adjustment
                 mode_params = TradingMode.get_mode_params(self.trading_mode, portfolio_value)
@@ -668,19 +709,8 @@ class ScalpingStrategy:
             if max_position_value < 1.0:  # Minimum $1 order
                 raise OrderExecutionError(f"Insufficient funds for {symbol}. Required: $1, Available funds: ${available_funds}, Portfolio: ${portfolio_value}")
             
-            # Additional validation for fixed trade amount
-            if getattr(self.settings, 'fixed_trade_amount_enabled', False):
-                # Ensure fixed amount doesn't exceed available funds
-                if max_position_value > available_funds:
-                    self.logger.warning(f"{symbol}: Fixed trade amount ${max_position_value:.2f} exceeds available funds ${available_funds:.2f}. Using available funds.")
-                    max_position_value = min(available_funds * 0.95, max_position_value)  # Use 95% of available funds as safety margin
-                
-                # Ensure fixed amount doesn't exceed portfolio risk limits (max 10% of portfolio)
-                max_portfolio_risk = portfolio_value * 0.1
-                if max_position_value > max_portfolio_risk:
-                    self.logger.warning(f"{symbol}: Fixed trade amount ${max_position_value:.2f} exceeds portfolio risk limit ${max_portfolio_risk:.2f}. Using risk limit.")
-                    max_position_value = max_portfolio_risk
-            else:
+            # Additional validation for non-fixed amount mode
+            if not getattr(self.settings, 'fixed_trade_amount_enabled', False):
                 # Additional check: ensure we have enough available funds for the order
                 if available_funds < max_position_value:
                     max_position_value = min(available_funds * 0.95, max_position_value)  # Use 95% of available funds as safety margin
