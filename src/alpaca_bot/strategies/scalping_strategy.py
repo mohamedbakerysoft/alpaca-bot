@@ -282,12 +282,27 @@ class ScalpingStrategy:
         """
         total_allocated = 0.0
         
-        for symbol, trade in self.active_positions.items():
-            if trade.trade_type == TradeType.BUY and trade.status == TradeStatus.FILLED:
-                # Calculate position value: quantity * entry price
-                position_value = trade.quantity * trade.price
-                total_allocated += position_value
-                self.logger.debug(f"Position {symbol}: {trade.quantity:.4f} shares @ ${trade.price:.2f} = ${position_value:.2f}")
+        try:
+            for symbol, trade in self.active_positions.items():
+                # Validate trade object
+                if trade is None:
+                    self.logger.warning(f"Found None trade object for symbol {symbol}")
+                    continue
+                    
+                if trade.trade_type == TradeType.BUY and trade.status == TradeStatus.FILLED:
+                    # Validate trade attributes
+                    if trade.quantity is None or trade.price is None:
+                        self.logger.warning(f"Invalid trade data for {symbol}: quantity={trade.quantity}, price={trade.price}")
+                        continue
+                        
+                    # Calculate position value: quantity * entry price
+                    position_value = float(trade.quantity) * float(trade.price)
+                    total_allocated += position_value
+                    self.logger.debug(f"Position {symbol}: {trade.quantity:.4f} shares @ ${trade.price:.2f} = ${position_value:.2f}")
+        except Exception as e:
+            self.logger.error(f"Error calculating allocated capital: {e}")
+            # Return 0.0 as a safe fallback to prevent TypeError in calculations
+            return 0.0
         
         self.logger.debug(f"Total allocated capital: ${total_allocated:.2f}")
         return total_allocated
@@ -676,8 +691,13 @@ class ScalpingStrategy:
                 # Calculate currently allocated capital from active positions
                 current_allocated = self._calculate_allocated_capital()
                 
+                # Ensure current_allocated is a valid number (safety check)
+                if current_allocated is None:
+                    self.logger.warning("_calculate_allocated_capital returned None, using 0.0 as fallback")
+                    current_allocated = 0.0
+                
                 # Calculate remaining capital available for new trades
-                remaining_capital = fixed_total_capital - current_allocated
+                remaining_capital = float(fixed_total_capital) - float(current_allocated)
                 
                 # Individual trade is capped at $10 maximum
                 max_individual_trade = 10.0
