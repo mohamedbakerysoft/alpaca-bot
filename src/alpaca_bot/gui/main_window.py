@@ -923,8 +923,14 @@ class MainWindow:
             if self.strategy:
                 for key, value in config.items():
                     if key == 'trading_mode':
-                        # Handle trading mode specially
-                        self.strategy.set_trading_mode(value)
+                        # Handle trading mode specially - convert string to enum
+                        from src.alpaca_bot.strategies.scalping_strategy import TradingMode
+                        try:
+                            trading_mode_enum = TradingMode(value)
+                            self.strategy.set_trading_mode(trading_mode_enum)
+                        except ValueError:
+                            self.logger.warning(f"Invalid trading mode '{value}', defaulting to conservative")
+                            self.strategy.set_trading_mode(TradingMode.CONSERVATIVE)
                     elif hasattr(self.strategy, key):
                         setattr(self.strategy, key, value)
                         
