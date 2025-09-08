@@ -672,7 +672,8 @@ class ConfigPanel:
         
         # Notify of settings change without saving
         if self.on_settings_change:
-            self.on_settings_change()
+            config_dict = self._get_current_config()
+            self.on_settings_change(config_dict)
      
     def _load_settings(self) -> None:
         """Load settings from the settings instance."""
@@ -821,7 +822,8 @@ class ConfigPanel:
             
             # Notify of settings change
             if self.on_settings_change:
-                self.on_settings_change()
+                config_dict = self._get_current_config()
+                self.on_settings_change(config_dict)
             
             messagebox.showinfo("Success", "Settings saved successfully!")
             self.logger.info("Settings saved successfully")
@@ -841,6 +843,25 @@ class ConfigPanel:
         except Exception as e:
             self.logger.error(f"Error reloading settings: {e}")
             messagebox.showerror("Error", f"Failed to reload settings: {e}")
+    
+    def _get_current_config(self) -> Dict:
+        """Get current configuration as a dictionary.
+        
+        Returns:
+            Dictionary containing current configuration values.
+        """
+        config = {}
+        try:
+            # Get all current values from config variables
+            for var_name, var in self.config_vars.items():
+                config[var_name] = var.get()
+            
+            self.logger.debug(f"Current config retrieved: {len(config)} settings")
+            return config
+            
+        except Exception as e:
+            self.logger.error(f"Error getting current config: {e}")
+            return {}
     
     def _reset_to_defaults(self) -> None:
         """Reset all settings to defaults."""
