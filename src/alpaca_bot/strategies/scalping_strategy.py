@@ -850,6 +850,12 @@ class ScalpingStrategy:
         def _update_all_positions():
             # Check pending orders
             for symbol, order_id in list(self.pending_orders.items()):
+                # Validate order_id before making API call
+                if not order_id or not isinstance(order_id, str) or order_id.strip() == "":
+                    self.logger.warning(f"Invalid order_id for {symbol}: {order_id}. Removing from pending orders.")
+                    del self.pending_orders[symbol]
+                    continue
+                    
                 order = self.alpaca_client.get_order(order_id)
                 if not order:
                     continue
