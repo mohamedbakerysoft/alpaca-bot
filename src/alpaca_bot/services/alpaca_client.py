@@ -273,7 +273,8 @@ class AlpacaClient:
             if qty is not None:
                 order_data["qty"] = qty
             else:
-                order_data["notional"] = notional
+                # Round notional to 2 decimal places as required by Alpaca API
+                order_data["notional"] = round(notional, 2)
             
             if limit_price is not None:
                 order_data["limit_price"] = limit_price
@@ -287,10 +288,17 @@ class AlpacaClient:
             # Place order
             order = self.api.submit_order(**order_data)
             
-            self.logger.info(
-                f"Order placed: {side} {qty} {symbol} at {order_type} "
-                f"(Order ID: {order.id})"
-            )
+            # Log order details appropriately for qty vs notional orders
+            if qty is not None:
+                self.logger.info(
+                    f"Order placed: {side} {qty} {symbol} at {order_type} "
+                    f"(Order ID: {order.id})"
+                )
+            else:
+                self.logger.info(
+                    f"Order placed: {side} ${notional:.2f} {symbol} at {order_type} "
+                    f"(Order ID: {order.id})"
+                )
             
             return order
             

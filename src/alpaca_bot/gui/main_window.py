@@ -733,16 +733,22 @@ class MainWindow:
                 for position in alpaca_positions:
                     try:
                         symbol = position.symbol
-                        quantity = float(position.qty)
-                        avg_price = float(position.avg_entry_price)
-                        current_price = float(position.market_value) / quantity if quantity != 0 else avg_price
-                        unrealized_pnl = float(position.unrealized_pl)
-                        unrealized_pnl_pct = float(position.unrealized_plpc) * 100
+                        quantity = float(position.qty) if position.qty is not None else 0.0
+                        avg_price = float(position.avg_entry_price) if position.avg_entry_price is not None else 0.0
+                        
+                        # Calculate current price safely
+                        if position.market_value is not None and quantity != 0:
+                            current_price = float(position.market_value) / quantity
+                        else:
+                            current_price = avg_price
+                            
+                        unrealized_pnl = float(position.unrealized_pl) if position.unrealized_pl is not None else 0.0
+                        unrealized_pnl_pct = float(position.unrealized_plpc) * 100 if position.unrealized_plpc is not None else 0.0
                         
                         # Insert into treeview
                         self.positions_tree.insert('', 'end', values=(
                             symbol,
-                            int(quantity),
+                            f"{float(quantity):.6f}".rstrip('0').rstrip('.'),
                             f"${avg_price:.2f}",
                             f"${current_price:.2f}",
                             f"${unrealized_pnl:+.2f}",
@@ -760,18 +766,32 @@ class MainWindow:
                         try:
                             # Get current quote
                             quote = self.alpaca_client.get_latest_quote(symbol)
-                            current_price = quote.bid if quote else trade.entry_price
+                            current_price = quote.bid if quote and hasattr(quote, 'bid') and quote.bid is not None else (trade.entry_price if trade.entry_price is not None else 0.0)
                             
-                            # Calculate P&L
-                            pnl = (current_price - trade.entry_price) * trade.quantity
-                            pnl_pct = (current_price - trade.entry_price) / trade.entry_price * 100
+                            # Ensure current_price is never None
+                            if current_price is None:
+                                current_price = trade.entry_price if trade.entry_price is not None else 0.0
                             
-                            # Insert into treeview
+                            # Calculate P&L with proper None checks
+                            if (current_price is not None and trade.entry_price is not None and 
+                                trade.quantity is not None and trade.entry_price != 0):
+                                pnl = (current_price - trade.entry_price) * trade.quantity
+                                pnl_pct = (current_price - trade.entry_price) / trade.entry_price * 100
+                            else:
+                                pnl = 0.0
+                                pnl_pct = 0.0
+                                current_price = trade.entry_price if trade.entry_price is not None else 0.0
+                            
+                            # Insert into treeview with safe formatting
+                            entry_price_str = f"${trade.entry_price:.2f}" if trade.entry_price is not None else "$0.00"
+                            current_price_str = f"${current_price:.2f}" if current_price is not None else "$0.00"
+                            quantity_str = f"{trade.quantity:.6f}".rstrip('0').rstrip('.') if trade.quantity is not None else "0"
+                            
                             self.positions_tree.insert('', 'end', values=(
                                 symbol,
-                                trade.quantity,
-                                f"${trade.entry_price:.2f}",
-                                f"${current_price:.2f}",
+                                quantity_str,
+                                entry_price_str,
+                                current_price_str,
                                 f"${pnl:+.2f}",
                                 f"{pnl_pct:+.2f}%"
                             ))
@@ -807,9 +827,9 @@ class MainWindow:
                     
                     # Format filled quantity and percentage
                     filled_qty = float(order.filled_qty) if order.filled_qty else 0
-                    total_qty = float(order.qty)
+                    total_qty = float(order.qty) if order.qty else 0
                     filled_pct = (filled_qty / total_qty * 100) if total_qty > 0 else 0
-                    filled_str = f"{filled_qty:.0f} ({filled_pct:.0f}%)"
+                    filled_str = f"{filled_qty:.0f} ({filled_pct:.0f}%)" if total_qty > 0 else "N/A"
                     
                     # Determine status tag for color coding
                     status = order.status.lower()
@@ -824,12 +844,18 @@ class MainWindow:
                     else:
                         tag = ''
                     
-                    # Insert into treeview with color coding
+                    # Handle quantity display for both regular and notional orders
+                    if total_qty > 0:
+                        qty_str = f"{total_qty:.0f}"
+                    elif hasattr(order, 'notional') and order.notional:
+                        qty_str = f"${float(order.notional):.2f}"
+                    else:
+                        qty_str = "Notional"
                     item = self.orders_tree.insert('', 'end', values=(
                         order.id[:8] + '...',  # Truncated order ID
                         order.symbol,
                         order.side.upper(),
-                        f"{total_qty:.0f}",
+                        qty_str,
                         order.order_type.upper(),
                         order.status.upper().replace('_', ' '),
                         price_str,

@@ -32,17 +32,25 @@ class StockQuote:
     @property
     def spread(self) -> float:
         """Calculate bid-ask spread."""
+        if self.ask is None or self.bid is None:
+            return 0.0
         return self.ask - self.bid
     
     @property
     def spread_percent(self) -> float:
         """Calculate bid-ask spread as percentage of mid price."""
+        if self.ask is None or self.bid is None:
+            return 0.0
         mid_price = (self.bid + self.ask) / 2
+        if mid_price == 0:
+            return 0.0
         return (self.spread / mid_price) * 100
     
     @property
     def mid_price(self) -> float:
         """Calculate mid price between bid and ask."""
+        if self.ask is None or self.bid is None:
+            return 0.0
         return (self.bid + self.ask) / 2
     
     def to_dict(self) -> dict:

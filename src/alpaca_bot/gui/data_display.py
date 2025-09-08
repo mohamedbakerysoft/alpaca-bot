@@ -341,7 +341,7 @@ class DataDisplay:
             self.last_price_label.config(text=f"${quote.price:.2f}")
             
             # Calculate and display price change
-            if quote.prev_close and quote.prev_close > 0:
+            if quote.prev_close and quote.prev_close > 0 and quote.price is not None:
                 change = quote.price - quote.prev_close
                 change_pct = (change / quote.prev_close) * 100
                 
@@ -421,8 +421,12 @@ class DataDisplay:
             for position in positions:
                 # Calculate current P&L (would need current price)
                 current_price = position.current_price or position.avg_price
-                pnl = (current_price - position.avg_price) * position.quantity
-                pnl_pct = (pnl / (position.avg_price * position.quantity)) * 100 if position.avg_price > 0 else 0
+                if current_price is not None and position.avg_price is not None and position.avg_price > 0:
+                    pnl = (current_price - position.avg_price) * position.quantity
+                    pnl_pct = (pnl / (position.avg_price * position.quantity)) * 100
+                else:
+                    pnl = 0.0
+                    pnl_pct = 0.0
                 
                 # Format values
                 values = (

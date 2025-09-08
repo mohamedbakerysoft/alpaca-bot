@@ -8,6 +8,7 @@ This module implements a scalping strategy that:
 """
 
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from enum import Enum
@@ -396,6 +397,12 @@ class ScalpingStrategy:
         """
         signals = []
         symbol = stock_data.symbol
+        
+        # Get current price with None check
+        if not stock_data.current_quote or stock_data.current_quote.ask is None:
+            self.logger.debug(f"{symbol}: No valid quote data available")
+            return signals
+        
         current_price = stock_data.current_quote.ask
         
         # Skip if already have position or pending order
@@ -438,7 +445,8 @@ class ScalpingStrategy:
         condition_scores = []
         
         # Condition 1: Price near support level (High priority)
-        if nearest_support:
+        if (nearest_support and nearest_support.price is not None and nearest_support.price > 0 and 
+            current_price is not None and current_price > 0):
             distance_to_support = abs(current_price - nearest_support.price) / current_price
             self.logger.debug(f"{symbol}: Distance to support: {distance_to_support:.4f} (threshold: {self.support_threshold})")
             if distance_to_support <= self.support_threshold:
@@ -455,12 +463,12 @@ class ScalpingStrategy:
                 condition_scores.append(1)
         
         # Condition 3: Price near lower Bollinger Band
-        if bb_lower and current_price <= bb_lower * 1.02:  # Within 2% of lower band
+        if bb_lower and current_price is not None and current_price <= bb_lower * 1.02:  # Within 2% of lower band
             buy_conditions.append(f"Near lower Bollinger Band (${bb_lower:.2f})")
             condition_scores.append(2)
         
         # Condition 4: Trend confirmation (price above SMA in uptrend)
-        if sma_20 and current_price > sma_20 * 0.98:  # Within 2% of SMA
+        if sma_20 and current_price is not None and current_price > sma_20 * 0.98:  # Within 2% of SMA
             buy_conditions.append(f"Price near/above SMA20 (${sma_20:.2f})")
             condition_scores.append(1)
         
@@ -472,7 +480,9 @@ class ScalpingStrategy:
                 condition_scores.append(1)
         
         # Condition 6: Risk/Reward ratio check
-        if nearest_resistance and nearest_support:
+        if (nearest_resistance and nearest_resistance.price is not None and nearest_resistance.price > 0 and
+            nearest_support and nearest_support.price is not None and nearest_support.price > 0 and
+            current_price is not None and current_price > 0):
             potential_profit = nearest_resistance.price - current_price
             potential_loss = current_price - nearest_support.price
             if potential_loss > 0 and potential_profit / potential_loss >= 2.0:  # 2:1 ratio
@@ -534,42 +544,96 @@ class ScalpingStrategy:
             Trade object if successful, None otherwise.
         """
         def _place_buy_order():
+            # Get account information first
+            account = self.alpaca_client.get_account()
+            if not account:
+                raise OrderExecutionError("Could not get account information")
+            
+            buying_power = float(account.buying_power)
+            cash_balance = float(account.cash) if hasattr(account, 'cash') else buying_power
+            
+            # Handle different account scenarios:
+            # 1. Normal account: use buying power
+            # 2. Margin disabled: use cash balance (if positive)
+            # 3. Negative cash (margin account): use a small percentage of portfolio value
+            if buying_power >= 1.0:
+                available_funds = buying_power
+                account_type = "normal"
+            elif cash_balance > 0:
+                available_funds = cash_balance
+                account_type = "cash_only"
+            else:
+                # Negative cash balance (margin account) - use 1% of portfolio value as safety
+                portfolio_val = float(account.portfolio_value) if hasattr(account, 'portfolio_value') else 1000.0
+                available_funds = max(portfolio_val * 0.01, 10.0)  # Minimum $10 for trading
+                account_type = "margin_negative"
+            
+            # Get portfolio value for logging
+            portfolio_val_for_log = float(account.portfolio_value) if hasattr(account, 'portfolio_value') else 1000.0
+            self.logger.info(f"{symbol}: Account analysis - Type: {account_type}, Buying Power: ${buying_power:.2f}, Cash: ${cash_balance:.2f}, Portfolio: ${portfolio_val_for_log:.2f}, Available Funds: ${available_funds:.2f}")
+            
             # Get current quote
             quote = self.alpaca_client.get_latest_quote(symbol)
             if not quote:
                 raise MarketDataError(f"Could not get quote for {symbol}")
             
             # Get portfolio value for dynamic parameter calculation
-            portfolio_value = float(account.portfolio_value) if hasattr(account, 'portfolio_value') else buying_power
+            portfolio_value = float(account.portfolio_value) if hasattr(account, 'portfolio_value') else available_funds
             
             # Get current trading mode parameters with dynamic adjustment
             mode_params = TradingMode.get_mode_params(self.trading_mode, portfolio_value)
             
-            # Calculate dynamic position size
-            account = self.alpaca_client.get_account()
-            if not account:
-                raise OrderExecutionError("Could not get account information")
-            
-            buying_power = float(account.buying_power)
-            
-            # Calculate position value based on mode and available funds
+            # Calculate position value based on mode and portfolio value (not buying power)
             max_position_value = min(
-                buying_power * 0.95 * mode_params['position_size_multiplier'],
+                portfolio_value * 0.05 * mode_params['position_size_multiplier'],  # Use 5% of portfolio value
                 mode_params['max_position_value'],
-                buying_power * 0.1  # Never use more than 10% of buying power per trade
+                portfolio_value * 0.1  # Never use more than 10% of portfolio value per trade
             )
             
             if max_position_value < 1.0:  # Minimum $1 order
-                raise OrderExecutionError(f"Insufficient buying power for {symbol}. Required: $1, Available: ${buying_power}")
+                raise OrderExecutionError(f"Insufficient funds for {symbol}. Required: $1, Available funds: ${available_funds}, Portfolio: ${portfolio_value}")
             
-            # Use notional order for fractional shares
-            order = self.alpaca_client.place_notional_order(
-                symbol=symbol,
-                notional_amount=max_position_value,
-                side='buy',
-                order_type='market',
-                time_in_force='day'
-            )
+            # Additional check: ensure we have enough available funds for the order
+            if available_funds < max_position_value:
+                max_position_value = min(available_funds * 0.95, max_position_value)  # Use 95% of available funds as safety margin
+                if max_position_value < 1.0:
+                    account_type = "margin" if cash_balance < 0 else "cash"
+                    raise OrderExecutionError(f"Insufficient available funds for {symbol} ({account_type} account). Required: $1, Available: ${available_funds:.2f}, Cash: ${cash_balance:.2f}, Portfolio: ${portfolio_value:.2f}")
+            
+            # For paper trading accounts with $0 buying power, simulate the order
+            if buying_power == 0.0:
+                 # Calculate quantity for simulation
+                 simulated_quantity = max(1, int(max_position_value / quote['ask']))
+                 simulated_cost = simulated_quantity * quote['ask']
+                 
+                 # Create a mock order object for simulation
+                 class MockOrder:
+                     def __init__(self, symbol, qty, side, price):
+                         self.id = f"SIMULATED_{symbol}_{int(time.time())}"
+                         self.symbol = symbol
+                         self.qty = qty
+                         self.side = side
+                         self.filled_avg_price = price
+                         self.status = 'filled'
+                 
+                 order = MockOrder(symbol, simulated_quantity, 'buy', quote['ask'])
+                 
+                 self.logger.info(
+                     f"SIMULATED ORDER: Buy {simulated_quantity} {symbol} at ${quote['ask']:.2f} "
+                     f"(Total: ${simulated_cost:.2f}) - Zero buying power account"
+                 )
+                 
+                 # Update max_position_value to reflect simulated order value
+                 max_position_value = simulated_cost
+            else:
+                # Use notional order for fractional shares when buying power is available
+                order = self.alpaca_client.place_notional_order(
+                    symbol=symbol,
+                    notional_amount=max_position_value,
+                    side='buy',
+                    order_type='market',
+                    time_in_force='day'
+                )
             
             if not order:
                 raise OrderExecutionError(f"Failed to place buy order for {symbol}")
@@ -596,7 +660,14 @@ class ScalpingStrategy:
                 symbol, 'buy', approx_quantity, 'market', order_id=order.id
             )
             
-            self.logger.info(f"Buy order placed for {symbol}: ${max_position_value:.2f} (~{approx_quantity:.4f} shares) [Portfolio: ${portfolio_value:.2f}]")
+            # Get account info for logging
+            account_info = self.alpaca_client.get_account()
+            current_buying_power = float(account_info.buying_power) if account_info else 0.0
+            current_cash = float(account_info.cash) if account_info and hasattr(account_info, 'cash') else current_buying_power
+            current_portfolio = float(account_info.portfolio_value) if account_info and hasattr(account_info, 'portfolio_value') else current_cash
+            current_available = current_cash if current_buying_power < 1.0 else current_buying_power
+            
+            self.logger.info(f"Buy order placed for {symbol}: ${max_position_value:.2f} (~{approx_quantity:.4f} shares) [Portfolio: ${current_portfolio:.2f}, Cash: ${current_cash:.2f}, Buying Power: ${current_buying_power:.2f}, Available: ${current_available:.2f}]")
             
             # Trigger account update callback if available
             if self.account_update_callback:
@@ -702,17 +773,26 @@ class ScalpingStrategy:
         if not stock_data:
             return None
         
+        # Check for valid quote data
+        if not stock_data.current_quote or stock_data.current_quote.bid is None:
+            self.logger.debug(f"{symbol}: No valid quote data for exit check")
+            return None
+        
         current_price = stock_data.current_quote.bid
         entry_price = position.price
         
         # Calculate profit/loss percentage
-        pnl_pct = (current_price - entry_price) / entry_price
+        if current_price is not None and entry_price is not None and entry_price != 0:
+            pnl_pct = (current_price - entry_price) / entry_price
+        else:
+            pnl_pct = 0.0
         
         # Update highest price for trailing stop
-        if symbol not in self.position_high_prices:
-            self.position_high_prices[symbol] = current_price
-        else:
-            self.position_high_prices[symbol] = max(self.position_high_prices[symbol], current_price)
+        if current_price is not None:
+            if symbol not in self.position_high_prices:
+                self.position_high_prices[symbol] = current_price
+            else:
+                self.position_high_prices[symbol] = max(self.position_high_prices[symbol], current_price)
         
         # Enhanced stop loss with trailing functionality
         if self.trailing_stop_enabled and pnl_pct >= self.min_profit_for_trailing:
@@ -720,7 +800,7 @@ class ScalpingStrategy:
             highest_price = self.position_high_prices[symbol]
             trailing_stop_price = highest_price * (1 - self.trailing_stop_pct)
             
-            if current_price <= trailing_stop_price:
+            if current_price is not None and current_price <= trailing_stop_price:
                 return ("SELL", f"Trailing stop triggered at ${trailing_stop_price:.2f} (High: ${highest_price:.2f})")
         else:
             # Regular stop loss
@@ -739,7 +819,8 @@ class ScalpingStrategy:
         
         # Enhanced resistance level condition with momentum check
         nearest_resistance = self._find_nearest_resistance(stock_data, current_price)
-        if nearest_resistance:
+        if (nearest_resistance and nearest_resistance.price is not None and nearest_resistance.price > 0 and
+            current_price is not None and current_price > 0):
             distance_to_resistance = abs(current_price - nearest_resistance.price) / current_price
             if distance_to_resistance <= self.resistance_threshold:
                 # Check if momentum is weakening near resistance
@@ -759,7 +840,7 @@ class ScalpingStrategy:
         
         # Upper Bollinger Band condition with volume confirmation
         bb_upper = stock_data.technical_indicators.bollinger_upper
-        if bb_upper and current_price >= bb_upper * 0.99:  # Within 1% of upper band
+        if bb_upper and current_price is not None and current_price >= bb_upper * 0.99:  # Within 1% of upper band
             return ("SELL", f"Near upper Bollinger Band (${bb_upper:.2f})")
         
         return None
@@ -802,7 +883,7 @@ class ScalpingStrategy:
         """
         def _process_filled_order():
             fill_price = float(order.filled_avg_price)
-            quantity = int(order.filled_qty)
+            quantity = float(order.filled_qty)
             
             trade_logger.log_order_filled(
                 symbol, order.side, quantity, fill_price, order.id
@@ -827,7 +908,10 @@ class ScalpingStrategy:
                 # Close existing position
                 if symbol in self.active_positions:
                     position = self.active_positions[symbol]
-                    pnl = (fill_price - position.price) * quantity
+                    if fill_price is not None and position.price is not None:
+                        pnl = (fill_price - position.price) * quantity
+                    else:
+                        pnl = 0.0
                     
                     trade_logger.log_position_closed(
                         symbol, quantity, position.price, fill_price, pnl
@@ -912,7 +996,8 @@ class ScalpingStrategy:
         # Adjust based on Bollinger Band position
         if (stock_data.technical_indicators and 
             stock_data.technical_indicators.bollinger_upper and 
-            stock_data.technical_indicators.bollinger_lower):
+            stock_data.technical_indicators.bollinger_lower and
+            stock_data.current_quote and stock_data.current_quote.bid is not None):
             
             current_price = stock_data.current_quote.bid
             bb_upper = stock_data.technical_indicators.bollinger_upper
@@ -946,7 +1031,8 @@ class ScalpingStrategy:
         
         # Check if price is at upper Bollinger Band with high RSI
         if (rsi and rsi > 65 and 
-            stock_data.technical_indicators.bollinger_upper):
+            stock_data.technical_indicators.bollinger_upper and
+            stock_data.current_quote and stock_data.current_quote.bid is not None):
             current_price = stock_data.current_quote.bid
             bb_upper = stock_data.technical_indicators.bollinger_upper
             if current_price >= bb_upper * 0.98:  # Within 2% of upper band
@@ -965,6 +1051,10 @@ class ScalpingStrategy:
         """
         if not stock_data.technical_indicators:
             return True  # Default to favorable if no data
+        
+        # Check for valid quote data
+        if not stock_data.current_quote or stock_data.current_quote.bid is None:
+            return False  # Not favorable if no valid quote
         
         current_price = stock_data.current_quote.bid
         
@@ -992,9 +1082,11 @@ class ScalpingStrategy:
                 return False
         
         # Check bid-ask spread (avoid trading with wide spreads)
-        bid = stock_data.current_quote.bid
-        ask = stock_data.current_quote.ask
-        if bid and ask:
+        if (stock_data.current_quote and 
+            stock_data.current_quote.bid is not None and 
+            stock_data.current_quote.ask is not None):
+            bid = stock_data.current_quote.bid
+            ask = stock_data.current_quote.ask
             spread_pct = (ask - bid) / bid
             if spread_pct > 0.01:  # 1% spread threshold
                 self.logger.debug(f"{stock_data.symbol}: Wide spread detected ({spread_pct:.3f})")
@@ -1008,13 +1100,13 @@ class ScalpingStrategy:
         
         return True
     
-    def _calculate_dynamic_position_size(self, symbol: str, current_price: float, buying_power: float) -> float:
+    def _calculate_dynamic_position_size(self, symbol: str, current_price: float, portfolio_value: float) -> float:
         """Calculate dynamic position size based on volatility and market conditions.
         
         Args:
             symbol: Stock symbol.
             current_price: Current stock price.
-            buying_power: Available buying power.
+            portfolio_value: Total portfolio value.
             
         Returns:
             Dynamic position size in dollars.
@@ -1047,9 +1139,9 @@ class ScalpingStrategy:
         
         # Account balance adjustment (Kelly Criterion inspired)
         account_multiplier = 1.0
-        if buying_power > 50000:  # Large account
+        if portfolio_value > 50000:  # Large account
             account_multiplier = 1.1
-        elif buying_power < 10000:  # Small account
+        elif portfolio_value < 10000:  # Small account
             account_multiplier = 0.8
         
         # RSI-based adjustment (reduce size in extreme conditions)
@@ -1139,6 +1231,8 @@ class ScalpingStrategy:
                 raise MarketDataError(f"Could not get quote for P&L calculation: {symbol}")
             
             current_price = quote['bid']
+            if current_price is None or trade.price is None:
+                return 0.0
             return (current_price - trade.price) * trade.quantity
         
         return safe_execute(
