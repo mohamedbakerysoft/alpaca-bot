@@ -84,6 +84,28 @@ class Settings:
             cast=float
         )
         
+        # Fixed Trade Amount Feature
+        self.fixed_trade_amount_enabled: bool = config(
+            "FIXED_TRADE_AMOUNT_ENABLED",
+            default=False,
+            cast=bool
+        )
+        self.fixed_trade_amount: float = config(
+            "FIXED_TRADE_AMOUNT",
+            default=100.0,
+            cast=float
+        )
+        self.min_trade_amount: float = config(
+            "MIN_TRADE_AMOUNT",
+            default=1.0,
+            cast=float
+        )
+        self.max_trade_amount: float = config(
+            "MAX_TRADE_AMOUNT",
+            default=10000.0,
+            cast=float
+        )
+        
         # Trading Mode
         self.trading_mode: str = config(
             "TRADING_MODE",

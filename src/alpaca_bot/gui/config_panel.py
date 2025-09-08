@@ -38,6 +38,10 @@ class ConfigPanel:
         self.frame = ttk.LabelFrame(parent, text="Configuration", padding=10)
         self.frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
+        # Create custom styles for visual indicators
+        self.style = ttk.Style()
+        self.style.configure('Active.TEntry', fieldbackground='#e8f5e8', bordercolor='#4CAF50')
+        
         # Configuration variables
         self.config_vars = {}
         self._create_config_vars()
@@ -76,6 +80,10 @@ class ConfigPanel:
             'fixed_position_amount': tk.DoubleVar(value=1000.0),
             'position_size_percent': tk.DoubleVar(value=2.0),
             'max_position_size': tk.DoubleVar(value=10000.0),
+            
+            # Fixed Trade Amount Feature
+            'fixed_trade_amount_enabled': tk.BooleanVar(value=False),
+            'fixed_trade_amount': tk.DoubleVar(value=100.0),
             
             # Risk management
             'stop_loss_percent': tk.DoubleVar(value=2.0),
@@ -231,20 +239,59 @@ class ConfigPanel:
         position_frame = ttk.LabelFrame(risk_frame, text="Position Sizing", padding=10)
         position_frame.pack(fill=tk.X, padx=5, pady=5)
         
+        # Fixed Trade Amount Feature
+        self.fixed_amount_frame = ttk.LabelFrame(position_frame, text="Fixed Trade Amount", padding=5)
+        self.fixed_amount_frame.grid(row=0, column=0, columnspan=3, sticky=tk.EW, padx=5, pady=5)
+        
+        # Enable/Disable checkbox
+        fixed_amount_check = ttk.Checkbutton(
+            self.fixed_amount_frame,
+            text="Enable Fixed Trade Amount",
+            variable=self.config_vars['fixed_trade_amount_enabled']
+        )
+        fixed_amount_check.grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
+        
+        # Fixed amount input
+        ttk.Label(self.fixed_amount_frame, text="Fixed Amount ($):").grid(row=1, column=0, sticky=tk.W, padx=5, pady=2)
+        self.fixed_amount_entry = ttk.Entry(
+            self.fixed_amount_frame,
+            textvariable=self.config_vars['fixed_trade_amount'],
+            width=15
+        )
+        self.fixed_amount_entry.grid(row=1, column=1, sticky=tk.W, padx=5, pady=2)
+        
+        # Add validation to the fixed amount entry
+        self.config_vars['fixed_trade_amount'].trace('w', self._validate_fixed_trade_amount)
+        
+        # Status indicator
+        self.fixed_amount_status = ttk.Label(
+            self.fixed_amount_frame,
+            text="Inactive",
+            foreground="gray"
+        )
+        self.fixed_amount_status.grid(row=1, column=2, sticky=tk.W, padx=10, pady=2)
+        
+        # Separator
+        ttk.Separator(position_frame, orient='horizontal').grid(row=1, column=0, columnspan=3, sticky=tk.EW, pady=10)
+        
         # Position sizing method
-        ttk.Label(position_frame, text="Method:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
-        method_combo = ttk.Combobox(
+        ttk.Label(position_frame, text="Method:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
+        self.position_method_combo = ttk.Combobox(
             position_frame,
             textvariable=self.config_vars['position_size_method'],
             values=['fixed_amount', 'percent_of_portfolio', 'volatility_based'],
             state="readonly",
             width=20
         )
-        method_combo.grid(row=0, column=1, sticky=tk.W, padx=5, pady=2)
+        self.position_method_combo.grid(row=2, column=1, sticky=tk.W, padx=5, pady=2)
         
-        self._create_labeled_entry(position_frame, "Fixed Amount ($):", 'fixed_position_amount', row=1)
-        self._create_labeled_entry(position_frame, "Portfolio Percent (%):", 'position_size_percent', row=2)
-        self._create_labeled_entry(position_frame, "Max Position Size ($):", 'max_position_size', row=3)
+        self._create_labeled_entry(position_frame, "Fixed Amount ($):", 'fixed_position_amount', row=3)
+        self._create_labeled_entry(position_frame, "Portfolio Percent (%):", 'position_size_percent', row=4)
+        self._create_labeled_entry(position_frame, "Max Position Size ($):", 'max_position_size', row=5)
+        
+        # Update status indicator when checkbox changes
+        self.config_vars['fixed_trade_amount_enabled'].trace('w', lambda *args: self._update_fixed_amount_status())
+        self._update_fixed_amount_status()  # Initial update
         
         # Risk limits section
         limits_frame = ttk.LabelFrame(risk_frame, text="Risk Limits", padding=10)
@@ -535,6 +582,98 @@ class ConfigPanel:
         self.config_vars['trading_end_hour'].set(end_hour)
         self.config_vars['trading_end_minute'].set(end_min)
     
+    def _validate_fixed_trade_amount(self, *args) -> bool:
+        """Validate the fixed trade amount.
+        
+        Returns:
+            True if valid, False otherwise.
+        """
+        try:
+            amount = self.config_vars['fixed_trade_amount'].get()
+            min_amount = getattr(self.settings, 'min_trade_amount', 1.0)
+            max_amount = getattr(self.settings, 'max_trade_amount', 10000.0)
+            
+            if amount < min_amount:
+                messagebox.showerror(
+                    "Invalid Amount", 
+                    f"Fixed trade amount must be at least ${min_amount:.2f}"
+                )
+                return False
+            elif amount > max_amount:
+                messagebox.showerror(
+                    "Invalid Amount", 
+                    f"Fixed trade amount cannot exceed ${max_amount:.2f}"
+                )
+                return False
+            
+            return True
+            
+        except (ValueError, tk.TclError):
+            messagebox.showerror(
+                "Invalid Amount", 
+                "Please enter a valid numeric amount"
+            )
+            return False
+    
+    def _update_fixed_amount_status(self) -> None:
+        """Update visual indicators when fixed amount feature is toggled."""
+        is_enabled = self.config_vars['fixed_trade_amount_enabled'].get()
+        
+        if is_enabled:
+            # Update frame title to show active state
+            if hasattr(self, 'fixed_amount_frame'):
+                self.fixed_amount_frame.config(text="Fixed Trade Amount - ACTIVE")
+            
+            # Update status indicator to show active state
+            self.fixed_amount_status.config(
+                text="ACTIVE",
+                foreground="green",
+                font=('TkDefaultFont', 9, 'bold')
+            )
+            
+            # Highlight the entry field
+            if hasattr(self, 'fixed_amount_entry'):
+                self.fixed_amount_entry.config(style='Active.TEntry')
+            
+            # Disable position sizing method combobox when fixed amount is active
+            if hasattr(self, 'position_method_combo'):
+                self.position_method_combo.config(state='disabled')
+            
+            # Show current fixed amount in status
+            try:
+                amount = self.config_vars['fixed_trade_amount'].get()
+                if amount > 0:
+                    self.fixed_amount_status.config(text=f"ACTIVE (${amount:.2f})")
+            except (ValueError, tk.TclError):
+                pass
+                
+            self.logger.info("Fixed trade amount feature activated")
+        else:
+            # Update frame title to show inactive state
+            if hasattr(self, 'fixed_amount_frame'):
+                self.fixed_amount_frame.config(text="Fixed Trade Amount")
+            
+            # Update status indicator to show inactive state
+            self.fixed_amount_status.config(
+                text="Inactive",
+                foreground="gray",
+                font=('TkDefaultFont', 9, 'normal')
+            )
+            
+            # Reset entry field styling
+            if hasattr(self, 'fixed_amount_entry'):
+                self.fixed_amount_entry.config(style='TEntry')
+            
+            # Re-enable position sizing method combobox
+            if hasattr(self, 'position_method_combo'):
+                self.position_method_combo.config(state='readonly')
+                
+            self.logger.info("Fixed trade amount feature deactivated")
+        
+        # Notify of settings change without saving
+        if self.on_settings_change:
+            self.on_settings_change()
+     
     def _load_settings(self) -> None:
         """Load settings from the settings instance."""
         try:
@@ -558,6 +697,10 @@ class ConfigPanel:
                 'fixed_position_amount': 'FIXED_POSITION_AMOUNT',
                 'position_size_percent': 'POSITION_SIZE_PERCENT',
                 'max_position_size': 'MAX_POSITION_SIZE',
+                
+                # Fixed Trade Amount Feature
+                'fixed_trade_amount_enabled': 'fixed_trade_amount_enabled',
+                'fixed_trade_amount': 'fixed_trade_amount',
                 
                 # Risk management
                 'stop_loss_percent': 'STOP_LOSS_PERCENT',
@@ -630,6 +773,10 @@ class ConfigPanel:
                 'FIXED_POSITION_AMOUNT': 'fixed_position_amount',
                 'POSITION_SIZE_PERCENT': 'position_size_percent',
                 'MAX_POSITION_SIZE': 'max_position_size',
+                
+                # Fixed Trade Amount Feature
+                'fixed_trade_amount_enabled': 'fixed_trade_amount_enabled',
+                'fixed_trade_amount': 'fixed_trade_amount',
                 
                 # Risk management
                 'STOP_LOSS_PERCENT': 'stop_loss_percent',

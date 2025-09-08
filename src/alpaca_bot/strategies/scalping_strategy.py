@@ -647,25 +647,48 @@ class ScalpingStrategy:
             # Get portfolio value for dynamic parameter calculation
             portfolio_value = float(account.portfolio_value) if hasattr(account, 'portfolio_value') else available_funds
             
-            # Get current trading mode parameters with dynamic adjustment
-            mode_params = TradingMode.get_mode_params(self.trading_mode, portfolio_value)
+            # Check if fixed trade amount is enabled
+            if getattr(self.settings, 'fixed_trade_amount_enabled', False):
+                # Use fixed trade amount when enabled
+                max_position_value = getattr(self.settings, 'fixed_trade_amount', 100.0)
+                self.logger.info(f"{symbol}: Using fixed trade amount: ${max_position_value:.2f}")
+            else:
+                # Get current trading mode parameters with dynamic adjustment
+                mode_params = TradingMode.get_mode_params(self.trading_mode, portfolio_value)
+                
+                # Calculate position value based on mode and portfolio value (not buying power)
+                max_position_value = min(
+                    portfolio_value * 0.05 * mode_params['position_size_multiplier'],  # Use 5% of portfolio value
+                    mode_params['max_position_value'],
+                    portfolio_value * 0.1  # Never use more than 10% of portfolio value per trade
+                )
+                self.logger.info(f"{symbol}: Using dynamic position sizing: ${max_position_value:.2f} (Portfolio: ${portfolio_value:.2f})")
             
-            # Calculate position value based on mode and portfolio value (not buying power)
-            max_position_value = min(
-                portfolio_value * 0.05 * mode_params['position_size_multiplier'],  # Use 5% of portfolio value
-                mode_params['max_position_value'],
-                portfolio_value * 0.1  # Never use more than 10% of portfolio value per trade
-            )
-            
+            # Validate minimum order amount
             if max_position_value < 1.0:  # Minimum $1 order
                 raise OrderExecutionError(f"Insufficient funds for {symbol}. Required: $1, Available funds: ${available_funds}, Portfolio: ${portfolio_value}")
             
-            # Additional check: ensure we have enough available funds for the order
-            if available_funds < max_position_value:
-                max_position_value = min(available_funds * 0.95, max_position_value)  # Use 95% of available funds as safety margin
-                if max_position_value < 1.0:
-                    account_type = "margin" if cash_balance < 0 else "cash"
-                    raise OrderExecutionError(f"Insufficient available funds for {symbol} ({account_type} account). Required: $1, Available: ${available_funds:.2f}, Cash: ${cash_balance:.2f}, Portfolio: ${portfolio_value:.2f}")
+            # Additional validation for fixed trade amount
+            if getattr(self.settings, 'fixed_trade_amount_enabled', False):
+                # Ensure fixed amount doesn't exceed available funds
+                if max_position_value > available_funds:
+                    self.logger.warning(f"{symbol}: Fixed trade amount ${max_position_value:.2f} exceeds available funds ${available_funds:.2f}. Using available funds.")
+                    max_position_value = min(available_funds * 0.95, max_position_value)  # Use 95% of available funds as safety margin
+                
+                # Ensure fixed amount doesn't exceed portfolio risk limits (max 10% of portfolio)
+                max_portfolio_risk = portfolio_value * 0.1
+                if max_position_value > max_portfolio_risk:
+                    self.logger.warning(f"{symbol}: Fixed trade amount ${max_position_value:.2f} exceeds portfolio risk limit ${max_portfolio_risk:.2f}. Using risk limit.")
+                    max_position_value = max_portfolio_risk
+            else:
+                # Additional check: ensure we have enough available funds for the order
+                if available_funds < max_position_value:
+                    max_position_value = min(available_funds * 0.95, max_position_value)  # Use 95% of available funds as safety margin
+            
+            # Final validation
+            if max_position_value < 1.0:
+                account_type = "margin" if cash_balance < 0 else "cash"
+                raise OrderExecutionError(f"Insufficient available funds for {symbol} ({account_type} account). Required: $1, Available: ${available_funds:.2f}, Cash: ${cash_balance:.2f}, Portfolio: ${portfolio_value:.2f}")
             
             # For paper trading accounts with $0 buying power, simulate the order
             if buying_power == 0.0:
