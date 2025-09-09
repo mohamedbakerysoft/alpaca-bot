@@ -864,12 +864,30 @@ class MainWindow:
                         tag = ''
                     
                     # Handle quantity display for both regular and notional orders
-                    if total_qty > 0:
-                        qty_str = f"{total_qty:.0f}"
+                    # For filled orders, show filled quantity; for pending orders, show total quantity
+                    if status in ['filled', 'partially_filled'] and filled_qty > 0:
+                        # For filled orders, show the filled quantity with more precision for small amounts
+                        if filled_qty < 1:
+                            qty_str = f"{filled_qty:.6f}"
+                        else:
+                            qty_str = f"{filled_qty:.2f}"
+                    elif total_qty > 0:
+                        # For pending orders, show total quantity
+                        if total_qty < 1:
+                            qty_str = f"{total_qty:.6f}"
+                        else:
+                            qty_str = f"{total_qty:.2f}"
                     elif hasattr(order, 'notional') and order.notional:
                         qty_str = f"${float(order.notional):.2f}"
                     else:
-                        qty_str = "Notional"
+                        # Fallback for orders where qty is None but filled_qty exists
+                        if filled_qty > 0:
+                            if filled_qty < 1:
+                                qty_str = f"{filled_qty:.6f}"
+                            else:
+                                qty_str = f"{filled_qty:.2f}"
+                        else:
+                            qty_str = "Notional"
                     item = self.orders_tree.insert('', 'end', values=(
                         order.id[:8] + '...',  # Truncated order ID
                         order.symbol,
