@@ -556,9 +556,20 @@ class ScalpingStrategy:
         self.logger.info(f"{symbol}: Price=${current_price:.2f}, RSI={rsi_str}, SMA20={sma_str}, "
                         f"BB_Lower={bb_lower_str}, Support={support_str}, Resistance={resistance_str}")
         
-        # Enhanced buy signal conditions
+        # Enhanced buy signal conditions with volume and momentum confirmation
         buy_conditions = []
         condition_scores = []
+        
+        # Get additional technical indicators for enhanced analysis
+        macd = stock_data.technical_indicators.macd
+        macd_signal = stock_data.technical_indicators.macd_signal
+        macd_histogram = stock_data.technical_indicators.macd_histogram
+        volume_sma = stock_data.technical_indicators.volume_sma
+        
+        # Get current volume from quote or bars
+        current_volume = None
+        if hasattr(stock_data, 'current_bars') and stock_data.current_bars:
+            current_volume = stock_data.current_bars[-1].volume if stock_data.current_bars else None
         
         # Condition 1: Price near support level (High priority)
         if (nearest_support and nearest_support.price is not None and nearest_support.price > 0 and 
@@ -578,24 +589,44 @@ class ScalpingStrategy:
                 buy_conditions.append(f"RSI approaching oversold ({rsi:.1f})")
                 condition_scores.append(1)
         
-        # Condition 3: Price near lower Bollinger Band
+        # Condition 3: MACD momentum confirmation (NEW)
+        if macd and macd_signal and macd_histogram:
+            # MACD bullish crossover or positive momentum
+            if macd > macd_signal and macd_histogram > 0:
+                buy_conditions.append(f"MACD bullish momentum (MACD: {macd:.4f})")
+                condition_scores.append(2)
+            elif macd > macd_signal:  # MACD above signal line
+                buy_conditions.append(f"MACD above signal line")
+                condition_scores.append(1)
+        
+        # Condition 4: Volume confirmation (NEW)
+        if current_volume and volume_sma and volume_sma > 0:
+            volume_ratio = current_volume / volume_sma
+            if volume_ratio >= 1.5:  # Volume 50% above average
+                buy_conditions.append(f"High volume confirmation ({volume_ratio:.1f}x avg)")
+                condition_scores.append(2)
+            elif volume_ratio >= 1.2:  # Volume 20% above average
+                buy_conditions.append(f"Above average volume ({volume_ratio:.1f}x avg)")
+                condition_scores.append(1)
+        
+        # Condition 5: Price near lower Bollinger Band
         if bb_lower and current_price is not None and current_price <= bb_lower * 1.02:  # Within 2% of lower band
             buy_conditions.append(f"Near lower Bollinger Band (${bb_lower:.2f})")
             condition_scores.append(2)
         
-        # Condition 4: Trend confirmation (price above SMA in uptrend)
+        # Condition 6: Trend confirmation (price above SMA in uptrend)
         if sma_20 and current_price is not None and current_price > sma_20 * 0.98:  # Within 2% of SMA
             buy_conditions.append(f"Price near/above SMA20 (${sma_20:.2f})")
             condition_scores.append(1)
         
-        # Condition 5: Bollinger Band squeeze (low volatility)
+        # Condition 7: Bollinger Band squeeze (low volatility)
         if bb_upper and bb_lower and bb_middle:
             bb_width = (bb_upper - bb_lower) / bb_middle
             if bb_width < 0.1:  # Tight bands indicate low volatility
                 buy_conditions.append("Low volatility (BB squeeze)")
                 condition_scores.append(1)
         
-        # Condition 6: Risk/Reward ratio check
+        # Condition 8: Risk/Reward ratio check
         if (nearest_resistance and nearest_resistance.price is not None and nearest_resistance.price > 0 and
             nearest_support and nearest_support.price is not None and nearest_support.price > 0 and
             current_price is not None and current_price > 0):
@@ -609,11 +640,19 @@ class ScalpingStrategy:
         total_score = sum(condition_scores)
         min_score = self.min_buy_score  # Use trading mode specific threshold
         
+        # Check for required signal types (support/technical + momentum + volume)
+        has_support_signal = any('support' in condition.lower() or 'rsi' in condition.lower() or 'bollinger' in condition.lower() for condition in buy_conditions)
+        has_momentum_signal = any('macd' in condition.lower() for condition in buy_conditions)
+        has_volume_signal = any('volume' in condition.lower() for condition in buy_conditions)
+        
         # Log conditions found
         self.logger.info(f"{symbol}: Buy conditions met: {len(buy_conditions)} (score: {total_score}/{min_score}) - {buy_conditions}")
+        self.logger.debug(f"{symbol}: Signal types - Support/Technical: {has_support_signal}, Momentum: {has_momentum_signal}, Volume: {has_volume_signal}")
         
-        # Generate buy signal if conditions and score met
-        if len(buy_conditions) >= 2 and total_score >= min_score:
+        # Generate buy signal if enhanced conditions are met
+        # Require at least 3 conditions with minimum score, including momentum and volume confirmation
+        if (len(buy_conditions) >= 3 and total_score >= min_score and 
+            has_support_signal and (has_momentum_signal or has_volume_signal)):
             reason = "; ".join(buy_conditions)
             signals.append(("BUY", reason))
             trade_logger.log_trade_signal(symbol, "BUY", current_price, reason)
@@ -785,12 +824,16 @@ class ScalpingStrategy:
                  # Update max_position_value to reflect simulated order value
                  max_position_value = simulated_cost
             else:
-                # Use notional order for fractional shares when buying power is available
-                order = self.alpaca_client.place_notional_order(
+                # Use limit order with small spread for better execution
+                # Set limit price slightly above ask to ensure fill while avoiding market order slippage
+                limit_price = round(quote['ask'] * 1.001, 2)  # 0.1% above ask price, rounded to nearest penny
+                
+                order = self.alpaca_client.place_order(
                     symbol=symbol,
-                    notional_amount=max_position_value,
+                    notional=max_position_value,
                     side='buy',
-                    order_type='market',
+                    order_type='limit',
+                    limit_price=limit_price,
                     time_in_force='day'
                 )
             
@@ -816,7 +859,7 @@ class ScalpingStrategy:
             self.pending_orders[symbol] = order.id
             
             trade_logger.log_order_placed(
-                symbol, 'buy', approx_quantity, 'market', order_id=order.id
+                symbol, 'buy', approx_quantity, 'limit', order_id=order.id
             )
             
             # Get account info for logging
@@ -861,21 +904,30 @@ class ScalpingStrategy:
             
             position_trade = self.active_positions[symbol]
             
-            # Place market sell order
+            # Get current quote for limit price calculation
+            quote = self.alpaca_client.get_latest_quote(symbol)
+            if not quote:
+                raise OrderExecutionError(f"Could not get quote for {symbol}")
+            
+            # Use limit order with small spread for better execution
+            # Set limit price slightly below bid to ensure fill while avoiding market order slippage
+            limit_price = round(quote['bid'] * 0.999, 2)  # 0.1% below bid price, rounded to nearest penny
+            
+            # Place limit sell order
             order = self.alpaca_client.place_order(
                 symbol=symbol,
                 qty=position_trade.quantity,
                 side='sell',
-                order_type='market',
+                order_type='limit',
+                limit_price=limit_price,
                 time_in_force='day'
             )
             
             if not order:
                 raise OrderExecutionError(f"Failed to place sell order for {symbol}")
             
-            # Get current quote for exit price
-            quote = self.alpaca_client.get_latest_quote(symbol)
-            exit_price = quote['bid'] if quote else position_trade.price
+            # Use limit price as exit price
+            exit_price = limit_price
             
             # Create sell trade object
             trade = Trade(
@@ -893,7 +945,7 @@ class ScalpingStrategy:
             self.pending_orders[symbol] = order.id
             
             trade_logger.log_order_placed(
-                symbol, 'sell', position_trade.quantity, 'market', order_id=order.id
+                symbol, 'sell', position_trade.quantity, 'limit', order_id=order.id
             )
             
             self.logger.info(f"Sell order placed for {symbol}: {position_trade.quantity} shares")
@@ -940,10 +992,16 @@ class ScalpingStrategy:
         current_price = stock_data.current_quote.bid
         entry_price = position.price
         
+        # Validate price data before calculations
+        if current_price is None or entry_price is None:
+            self.logger.debug(f"{symbol}: Invalid price data - current: {current_price}, entry: {entry_price}")
+            return None
+        
         # Calculate profit/loss percentage
-        if current_price is not None and entry_price is not None and entry_price != 0:
+        if entry_price != 0:
             pnl_pct = (current_price - entry_price) / entry_price
         else:
+            self.logger.warning(f"{symbol}: Entry price is zero, cannot calculate P&L")
             pnl_pct = 0.0
         
         # Update highest price for trailing stop
@@ -956,11 +1014,12 @@ class ScalpingStrategy:
         # Enhanced stop loss with trailing functionality
         if self.trailing_stop_enabled and pnl_pct >= self.min_profit_for_trailing:
             # Use trailing stop once we're in profit
-            highest_price = self.position_high_prices[symbol]
-            trailing_stop_price = highest_price * (1 - self.trailing_stop_pct)
-            
-            if current_price is not None and current_price <= trailing_stop_price:
-                return ("SELL", f"Trailing stop triggered at ${trailing_stop_price:.2f} (High: ${highest_price:.2f})")
+            highest_price = self.position_high_prices.get(symbol)
+            if highest_price is not None:
+                trailing_stop_price = highest_price * (1 - self.trailing_stop_pct)
+                
+                if current_price <= trailing_stop_price:
+                    return ("SELL", f"Trailing stop triggered at ${trailing_stop_price:.2f} (High: ${highest_price:.2f})")
         else:
             # Regular stop loss
             if pnl_pct <= -self.stop_loss_pct:
@@ -979,12 +1038,16 @@ class ScalpingStrategy:
         # Enhanced resistance level condition with momentum check
         nearest_resistance = self._find_nearest_resistance(stock_data, current_price)
         if (nearest_resistance and nearest_resistance.price is not None and nearest_resistance.price > 0 and
-            current_price is not None and current_price > 0):
-            distance_to_resistance = abs(current_price - nearest_resistance.price) / current_price
-            if distance_to_resistance <= self.resistance_threshold:
-                # Check if momentum is weakening near resistance
-                if self._is_momentum_weakening(stock_data):
-                    return ("SELL", f"Near resistance with weak momentum at ${nearest_resistance.price:.2f}")
+            current_price > 0):
+            try:
+                distance_to_resistance = abs(current_price - nearest_resistance.price) / current_price
+                if distance_to_resistance <= self.resistance_threshold:
+                    # Check if momentum is weakening near resistance
+                    if self._is_momentum_weakening(stock_data):
+                        return ("SELL", f"Near resistance with weak momentum at ${nearest_resistance.price:.2f}")
+            except (TypeError, ZeroDivisionError) as e:
+                self.logger.debug(f"{symbol}: Error calculating resistance distance: {e}")
+                pass
         
         # RSI overbought condition with stricter threshold when profitable
         if stock_data.technical_indicators is None:
@@ -999,7 +1062,7 @@ class ScalpingStrategy:
         
         # Upper Bollinger Band condition with volume confirmation
         bb_upper = stock_data.technical_indicators.bollinger_upper
-        if bb_upper and current_price is not None and current_price >= bb_upper * 0.99:  # Within 1% of upper band
+        if bb_upper and current_price >= bb_upper * 0.99:  # Within 1% of upper band
             return ("SELL", f"Near upper Bollinger Band (${bb_upper:.2f})")
         
         return None
