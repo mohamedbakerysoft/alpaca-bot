@@ -17,14 +17,15 @@ import pandas as pd
 from alpaca_trade_api.rest import REST
 
 from ..config.settings import settings
-from ..models.stock import StockData, StockQuote, SupportResistanceLevel, TechnicalIndicators
+from ..models.stock import StockData, StockQuote, StockBar, SupportResistanceLevel, TechnicalIndicators
 from ..models.trade import Trade, TradeType, OrderType, TradeStatus
 from ..services.alpaca_client import AlpacaClient
 from ..utils.technical_analysis import (
     identify_support_resistance_levels,
     calculate_rsi,
     calculate_bollinger_bands,
-    calculate_sma
+    calculate_sma,
+    calculate_macd
 )
 from ..utils.logging_utils import trade_logger
 from ..utils.error_handler import (
@@ -449,11 +450,21 @@ class ScalpingStrategy:
             df['sma_20'] = calculate_sma(df['close'], 20)
             df['rsi'] = calculate_rsi(df['close'])
             
+            # Calculate MACD
+            macd, macd_signal, macd_hist = calculate_macd(df['close'])
+            df['macd'] = macd
+            df['macd_signal'] = macd_signal
+            df['macd_histogram'] = macd_hist
+            
             # Calculate Bollinger Bands
             bb_upper, bb_middle, bb_lower = calculate_bollinger_bands(df['close'])
             df['bollinger_upper'] = bb_upper
             df['bollinger_middle'] = bb_middle
             df['bollinger_lower'] = bb_lower
+            
+            # Calculate volume SMA if volume data is available
+            if 'volume' in df.columns:
+                df['volume_sma'] = calculate_sma(df['volume'], 20)
             
             # Calculate support and resistance levels
             self.logger.info(f"{symbol}: DataFrame shape for S/R calculation: {df.shape}")
@@ -480,6 +491,21 @@ class ScalpingStrategy:
                 timestamp=datetime.now()  # Use current time since IEX doesn't provide timestamp in the dict
             )
             
+            # Convert DataFrame to StockBar objects for current_bars
+            current_bars = []
+            if len(df) > 0:
+                latest_row = df.iloc[-1]
+                latest_bar = StockBar(
+                    symbol=symbol,
+                    timestamp=latest_row.name if hasattr(latest_row.name, 'to_pydatetime') else datetime.now(),
+                    open=latest_row['open'],
+                    high=latest_row['high'],
+                    low=latest_row['low'],
+                    close=latest_row['close'],
+                    volume=latest_row.get('volume', 0)
+                )
+                current_bars = [latest_bar]
+            
             # Create stock data object
             stock_data = StockData(
                 symbol=symbol,
@@ -492,11 +518,18 @@ class ScalpingStrategy:
                     timestamp=datetime.now(),
                     rsi=df['rsi'].iloc[-1] if not pd.isna(df['rsi'].iloc[-1]) else None,
                     sma_20=df['sma_20'].iloc[-1] if not pd.isna(df['sma_20'].iloc[-1]) else None,
+                    macd=df['macd'].iloc[-1] if 'macd' in df.columns and not pd.isna(df['macd'].iloc[-1]) else None,
+                    macd_signal=df['macd_signal'].iloc[-1] if 'macd_signal' in df.columns and not pd.isna(df['macd_signal'].iloc[-1]) else None,
+                    macd_histogram=df['macd_histogram'].iloc[-1] if 'macd_histogram' in df.columns and not pd.isna(df['macd_histogram'].iloc[-1]) else None,
                     bollinger_upper=df['bollinger_upper'].iloc[-1] if not pd.isna(df['bollinger_upper'].iloc[-1]) else None,
-                     bollinger_middle=df['bollinger_middle'].iloc[-1] if not pd.isna(df['bollinger_middle'].iloc[-1]) else None,
-                     bollinger_lower=df['bollinger_lower'].iloc[-1] if not pd.isna(df['bollinger_lower'].iloc[-1]) else None,
+                    bollinger_middle=df['bollinger_middle'].iloc[-1] if not pd.isna(df['bollinger_middle'].iloc[-1]) else None,
+                    bollinger_lower=df['bollinger_lower'].iloc[-1] if not pd.isna(df['bollinger_lower'].iloc[-1]) else None,
+                    volume_sma=df['volume_sma'].iloc[-1] if 'volume_sma' in df.columns and not pd.isna(df['volume_sma'].iloc[-1]) else None,
                 )
             )
+            
+            # Add current_bars as a dynamic attribute
+            stock_data.current_bars = current_bars
             
             # Update cache
             self.price_data_cache[symbol] = stock_data
@@ -578,6 +611,10 @@ class ScalpingStrategy:
         current_volume = None
         if hasattr(stock_data, 'current_bars') and stock_data.current_bars:
             current_volume = stock_data.current_bars[-1].volume if stock_data.current_bars else None
+        
+        # Debug logging for technical indicators
+        self.logger.debug(f"{symbol}: MACD={macd}, MACD_Signal={macd_signal}, MACD_Hist={macd_histogram}")
+        self.logger.debug(f"{symbol}: Current_Volume={current_volume}, Volume_SMA={volume_sma}")
         
         # Condition 1: Price near support level (High priority)
         if (nearest_support and nearest_support.price is not None and nearest_support.price > 0 and 
