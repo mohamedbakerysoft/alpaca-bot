@@ -165,8 +165,6 @@ class ScalpingStrategy:
         self.account_update_callback = account_update_callback
         self.order_update_callback = order_update_callback
         self.settings = settings  # Add settings reference for dynamic parameter updates
-        
-        # Strategy parameters from settings
         self.support_threshold = settings.support_threshold
         self.resistance_threshold = settings.resistance_threshold
         self.rsi_oversold = getattr(settings, 'rsi_oversold', 30.0)
@@ -180,6 +178,15 @@ class ScalpingStrategy:
         self.trailing_stop_pct = 0.01  # 1% trailing stop
         self.min_profit_for_trailing = 0.005  # 0.5% minimum profit before enabling trailing
         self.dynamic_exit_enabled = True
+
+        # Partial profit-taking configuration
+        self.partial_profit_taking_enabled = True
+        self.partial_profit_tiers = [
+            (0.0003, 0.05),  # Sell 5% at 0.03% profit
+            (0.0006, 0.10),  # Sell 10% at 0.06% profit
+            (0.0010, 0.15),  # Sell 15% at 0.10% profit
+            (0.0015, 0.20),  # Sell 20% at 0.15% profit
+        ]
         
         # Trading mode parameters
         trading_mode_str = getattr(settings, 'trading_mode', 'conservative')
@@ -194,6 +201,7 @@ class ScalpingStrategy:
         self.active_positions: Dict[str, Trade] = {}
         self.pending_orders: Dict[str, str] = {}  # symbol -> order_id
         self.position_high_prices: Dict[str, float] = {}  # Track highest price for trailing stops
+        self.partial_profit_progress: Dict[str, int] = {}  # Tracks profit-taking progress
         
         # Fixed amount capital tracking
         self._total_allocated_capital = 0.0  # Track total capital allocated from fixed amount
@@ -659,13 +667,14 @@ class ScalpingStrategy:
         
         return signals
     
-    def execute_trade(self, symbol: str, signal_type: str, reason: str) -> Optional[Trade]:
+    def execute_trade(self, symbol: str, signal_type: str, reason: str, sell_fraction: Optional[float] = None) -> Optional[Trade]:
         """Execute a trade based on the signal.
         
         Args:
             symbol: Stock symbol.
-            signal_type: Type of signal (BUY/SELL).
+            signal_type: Type of signal (BUY/SELL/PARTIAL_SELL).
             reason: Reason for the trade.
+            sell_fraction: Fraction of the position to sell.
             
         Returns:
             Trade object if successful, None otherwise.
@@ -674,7 +683,11 @@ class ScalpingStrategy:
             if signal_type == "BUY":
                 return self._execute_buy_order(symbol, reason)
             elif signal_type == "SELL":
-                return self._execute_sell_order(symbol, reason)
+                return self._execute_sell_order(symbol, reason, 1.0)
+            elif signal_type == "PARTIAL_SELL":
+                if sell_fraction is None:
+                    raise OrderExecutionError("sell_fraction must be provided for PARTIAL_SELL")
+                return self._execute_sell_order(symbol, reason, sell_fraction)
             else:
                 raise OrderExecutionError(f"Unknown signal type: {signal_type}")
         
@@ -887,7 +900,7 @@ class ScalpingStrategy:
             log_errors=True
         )
     
-    def _execute_sell_order(self, symbol: str, reason: str) -> Optional[Trade]:
+    def _execute_sell_order(self, symbol: str, reason: str, sell_fraction: float) -> Optional[Trade]:
         """Execute a sell order for existing position.
         
         Args:
@@ -916,7 +929,7 @@ class ScalpingStrategy:
             # Place limit sell order
             order = self.alpaca_client.place_order(
                 symbol=symbol,
-                qty=position_trade.quantity,
+                qty=quantity_to_sell,
                 side='sell',
                 order_type='limit',
                 limit_price=limit_price,
@@ -933,7 +946,7 @@ class ScalpingStrategy:
             trade = Trade(
                 symbol=symbol,
                 trade_type=TradeType.SELL,
-                quantity=position_trade.quantity,
+                quantity=quantity_to_sell,
                 price=exit_price,
                 timestamp=datetime.now(),
                 order_id=order.id,
@@ -945,10 +958,10 @@ class ScalpingStrategy:
             self.pending_orders[symbol] = order.id
             
             trade_logger.log_order_placed(
-                symbol, 'sell', position_trade.quantity, 'limit', order_id=order.id
+                symbol, 'sell', quantity_to_sell, 'limit', order_id=order.id
             )
             
-            self.logger.info(f"Sell order placed for {symbol}: {position_trade.quantity} shares")
+            self.logger.info(f"Sell order placed for {symbol}: {quantity_to_sell} shares")
             
             # Trigger account update callback if available
             if self.account_update_callback:
@@ -966,7 +979,7 @@ class ScalpingStrategy:
             log_errors=True
         )
     
-    def check_exit_conditions(self, symbol: str) -> Optional[Tuple[str, str]]:
+    def check_exit_conditions(self, symbol: str) -> Optional[Tuple[str, str, float]]:
         """Check if exit conditions are met for an active position.
         
         Args:
@@ -984,7 +997,6 @@ class ScalpingStrategy:
         if not stock_data:
             return None
         
-        # Check for valid quote data
         if not stock_data.current_quote or stock_data.current_quote.bid is None:
             self.logger.debug(f"{symbol}: No valid quote data for exit check")
             return None
@@ -992,19 +1004,25 @@ class ScalpingStrategy:
         current_price = stock_data.current_quote.bid
         entry_price = position.price
         
-        # Validate price data before calculations
         if current_price is None or entry_price is None:
             self.logger.debug(f"{symbol}: Invalid price data - current: {current_price}, entry: {entry_price}")
             return None
         
-        # Calculate profit/loss percentage
         if entry_price != 0:
             pnl_pct = (current_price - entry_price) / entry_price
         else:
             self.logger.warning(f"{symbol}: Entry price is zero, cannot calculate P&L")
             pnl_pct = 0.0
         
-        # Update highest price for trailing stop
+        # Partial profit-taking logic
+        if self.partial_profit_enabled:
+            for i, tier in enumerate(self.partial_profit_tiers):
+                if pnl_pct >= tier['profit_pct'] and position.partial_profit_progress < (i + 1):
+                    sell_fraction = tier['sell_fraction']
+                    reason = f"Partial profit tier {i+1} reached at {pnl_pct:.2%}"
+                    trade_logger.log_trade_signal(symbol, "PARTIAL_SELL", current_price, reason)
+                    return ("PARTIAL_SELL", reason, sell_fraction)
+
         if current_price is not None:
             if symbol not in self.position_high_prices:
                 self.position_high_prices[symbol] = current_price
@@ -1013,27 +1031,25 @@ class ScalpingStrategy:
         
         # Enhanced stop loss with trailing functionality
         if self.trailing_stop_enabled and pnl_pct >= self.min_profit_for_trailing:
-            # Use trailing stop once we're in profit
             highest_price = self.position_high_prices.get(symbol)
             if highest_price is not None:
                 trailing_stop_price = highest_price * (1 - self.trailing_stop_pct)
                 
                 if current_price <= trailing_stop_price:
-                    return ("SELL", f"Trailing stop triggered at ${trailing_stop_price:.2f} (High: ${highest_price:.2f})")
+                    return ("SELL", f"Trailing stop triggered at ${trailing_stop_price:.2f} (High: ${highest_price:.2f})", 1.0)
         else:
-            # Regular stop loss
             if pnl_pct <= -self.stop_loss_pct:
-                return ("SELL", f"Stop loss triggered ({pnl_pct:.2%})")
+                return ("SELL", f"Stop loss triggered ({pnl_pct:.2%})", 1.0)
         
         # Dynamic take profit based on volatility and momentum
         if self.dynamic_exit_enabled:
             dynamic_take_profit = self._calculate_dynamic_take_profit(stock_data, pnl_pct)
             if pnl_pct >= dynamic_take_profit:
-                return ("SELL", f"Dynamic take profit triggered ({pnl_pct:.2%}, target: {dynamic_take_profit:.2%})")
+                return ("SELL", f"Dynamic take profit triggered ({pnl_pct:.2%}, target: {dynamic_take_profit:.2%})", 1.0)
         else:
             # Standard take profit condition
             if pnl_pct >= self.take_profit_pct:
-                return ("SELL", f"Take profit triggered ({pnl_pct:.2%})")
+                return ("SELL", f"Take profit triggered ({pnl_pct:.2%})", 1.0)
         
         # Enhanced resistance level condition with momentum check
         nearest_resistance = self._find_nearest_resistance(stock_data, current_price)
@@ -1044,7 +1060,7 @@ class ScalpingStrategy:
                 if distance_to_resistance <= self.resistance_threshold:
                     # Check if momentum is weakening near resistance
                     if self._is_momentum_weakening(stock_data):
-                        return ("SELL", f"Near resistance with weak momentum at ${nearest_resistance.price:.2f}")
+                        return ("SELL", f"Near resistance with weak momentum at ${nearest_resistance.price:.2f}", 1.0)
             except (TypeError, ZeroDivisionError) as e:
                 self.logger.debug(f"{symbol}: Error calculating resistance distance: {e}")
                 pass
@@ -1058,12 +1074,12 @@ class ScalpingStrategy:
             # Use stricter RSI threshold when in profit
             rsi_threshold = self.rsi_overbought - 5 if pnl_pct > 0.01 else self.rsi_overbought
             if rsi >= rsi_threshold:
-                return ("SELL", f"RSI overbought ({rsi:.1f}, threshold: {rsi_threshold:.1f})")
+                return ("SELL", f"RSI overbought ({rsi:.1f}, threshold: {rsi_threshold:.1f})", 1.0)
         
         # Upper Bollinger Band condition with volume confirmation
         bb_upper = stock_data.technical_indicators.bollinger_upper
         if bb_upper and current_price >= bb_upper * 0.99:  # Within 1% of upper band
-            return ("SELL", f"Near upper Bollinger Band (${bb_upper:.2f})")
+            return ("SELL", f"Near upper Bollinger Band (${bb_upper:.2f})", 1.0)
         
         return None
     
@@ -1093,8 +1109,8 @@ class ScalpingStrategy:
             for symbol in list(self.active_positions.keys()):
                 exit_signal = self.check_exit_conditions(symbol)
                 if exit_signal:
-                    signal_type, reason = exit_signal
-                    self.execute_trade(symbol, signal_type, reason)
+                    signal_type, reason, sell_fraction = exit_signal
+                    self.execute_trade(symbol, signal_type, reason, sell_fraction=sell_fraction)
         
         safe_execute(
             _update_all_positions,
@@ -1129,23 +1145,35 @@ class ScalpingStrategy:
                     status=TradeStatus.FILLED
                 )
                 self.active_positions[symbol] = trade
+                self.partial_profit_progress[symbol] = -1 # Initialize progress
                 
                 trade_logger.log_position_opened(symbol, quantity, fill_price)
                 
             elif order.side == 'sell':
-                # Close existing position
+                # Update or close existing position
                 if symbol in self.active_positions:
                     position = self.active_positions[symbol]
+                    
+                    # Calculate PnL for the sold portion
                     if fill_price is not None and position.price is not None:
                         pnl = (fill_price - position.price) * quantity
                     else:
                         pnl = 0.0
-                    
+
+                    # Log the partial or full closure
                     trade_logger.log_position_closed(
                         symbol, quantity, position.price, fill_price, pnl
                     )
+
+                    # Reduce position quantity
+                    position.quantity -= quantity
                     
-                    del self.active_positions[symbol]
+                    # If position is fully closed, remove it
+                    if position.quantity <= 0.0001: # Use a small threshold for float comparison
+                        del self.active_positions[symbol]
+                        # Reset partial profit progress
+                        if symbol in self.partial_profit_progress:
+                            del self.partial_profit_progress[symbol]
         
         safe_execute(
             _process_filled_order,
