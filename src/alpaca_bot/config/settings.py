@@ -241,6 +241,112 @@ class Settings:
         
         # Re-validate after updates
         self._validate_settings()
+    
+    def save_to_env_file(self, env_file_path: str = None) -> bool:
+        """Save current settings to .env file.
+        
+        Args:
+            env_file_path (str, optional): Path to .env file. Defaults to project root/.env
+            
+        Returns:
+            bool: True if saved successfully, False otherwise.
+        """
+        try:
+            if env_file_path is None:
+                env_file_path = get_project_root() / ".env"
+            else:
+                env_file_path = Path(env_file_path)
+            
+            # Read existing .env file if it exists
+            existing_vars = {}
+            if env_file_path.exists():
+                with open(env_file_path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#') and '=' in line:
+                            key, value = line.split('=', 1)
+                            existing_vars[key.strip()] = value.strip()
+            
+            # Update with current settings
+            settings_to_save = {
+                # Alpaca API Settings
+                'ALPACA_API_KEY': self.alpaca_api_key,
+                'ALPACA_SECRET_KEY': self.alpaca_secret_key,
+                'ALPACA_BASE_URL': self.alpaca_base_url,
+                'PAPER_TRADING': str(self.paper_trading).lower(),
+                
+                # Trading Configuration
+                'TRADING_MODE': self.trading_mode,
+                'SUPPORT_THRESHOLD': str(self.support_threshold),
+                'RESISTANCE_THRESHOLD': str(self.resistance_threshold),
+                'STOP_LOSS_PERCENTAGE': str(self.stop_loss_percentage),
+                'DEFAULT_POSITION_SIZE': str(self.default_position_size),
+                
+                # Fixed Trade Amount Feature
+                'FIXED_TRADE_AMOUNT_ENABLED': str(self.fixed_trade_amount_enabled).lower(),
+                'FIXED_TRADE_AMOUNT': str(self.fixed_trade_amount),
+                
+                # Custom Portfolio Value Feature
+                'CUSTOM_PORTFOLIO_VALUE_ENABLED': str(self.custom_portfolio_value_enabled).lower(),
+                'CUSTOM_PORTFOLIO_VALUE': str(self.custom_portfolio_value),
+                
+                # Application Settings
+                'LOG_LEVEL': self.log_level,
+                'LOG_FILE_PATH': self.log_file_path,
+                'DATA_REFRESH_INTERVAL': str(self.data_refresh_interval),
+                
+                # GUI Settings
+                'WINDOW_WIDTH': str(self.window_width),
+                'WINDOW_HEIGHT': str(self.window_height),
+            }
+            
+            # Merge with existing variables (preserve non-settings variables)
+            existing_vars.update(settings_to_save)
+            
+            # Write to .env file
+            with open(env_file_path, 'w') as f:
+                f.write("# Alpaca Trading Bot Configuration\n")
+                f.write("# Generated automatically - modify with caution\n\n")
+                
+                # Group settings by category
+                f.write("# Alpaca API Settings\n")
+                for key in ['ALPACA_API_KEY', 'ALPACA_SECRET_KEY', 'ALPACA_BASE_URL', 'PAPER_TRADING']:
+                    if key in existing_vars:
+                        f.write(f"{key}={existing_vars[key]}\n")
+                
+                f.write("\n# Trading Configuration\n")
+                for key in ['TRADING_MODE', 'SUPPORT_THRESHOLD', 'RESISTANCE_THRESHOLD', 'STOP_LOSS_PERCENTAGE', 'DEFAULT_POSITION_SIZE']:
+                    if key in existing_vars:
+                        f.write(f"{key}={existing_vars[key]}\n")
+                
+                f.write("\n# Position Sizing Features\n")
+                for key in ['FIXED_TRADE_AMOUNT_ENABLED', 'FIXED_TRADE_AMOUNT', 'CUSTOM_PORTFOLIO_VALUE_ENABLED', 'CUSTOM_PORTFOLIO_VALUE']:
+                    if key in existing_vars:
+                        f.write(f"{key}={existing_vars[key]}\n")
+                
+                f.write("\n# Application Settings\n")
+                for key in ['LOG_LEVEL', 'LOG_FILE_PATH', 'DATA_REFRESH_INTERVAL']:
+                    if key in existing_vars:
+                        f.write(f"{key}={existing_vars[key]}\n")
+                
+                f.write("\n# GUI Settings\n")
+                for key in ['WINDOW_WIDTH', 'WINDOW_HEIGHT']:
+                    if key in existing_vars:
+                        f.write(f"{key}={existing_vars[key]}\n")
+                
+                # Write any other existing variables
+                other_vars = {k: v for k, v in existing_vars.items() 
+                             if k not in settings_to_save}
+                if other_vars:
+                    f.write("\n# Other Settings\n")
+                    for key, value in other_vars.items():
+                        f.write(f"{key}={value}\n")
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error saving settings to .env file: {e}")
+            return False
 
 
 def get_project_root() -> Path:

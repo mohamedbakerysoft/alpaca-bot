@@ -963,8 +963,13 @@ class ConfigPanel:
                 config_dict = self._get_current_config()
                 self.on_settings_change(config_dict)
             
-            messagebox.showinfo("Success", "Settings saved successfully!")
-            self.logger.info("Settings saved successfully")
+            # Save settings to .env file for persistence
+            if self.settings.save_to_env_file():
+                messagebox.showinfo("Success", "Settings saved successfully and persisted to .env file!")
+                self.logger.info("Settings saved successfully and persisted to .env file")
+            else:
+                messagebox.showwarning("Partial Success", "Settings saved to memory but failed to persist to .env file.")
+                self.logger.warning("Settings saved to memory but failed to persist to .env file")
             
         except Exception as e:
             self.logger.error(f"Error saving settings: {e}")
