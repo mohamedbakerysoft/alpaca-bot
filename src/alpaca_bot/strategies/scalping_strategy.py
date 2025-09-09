@@ -703,8 +703,8 @@ class ScalpingStrategy:
             
             # Check if fixed trade amount is enabled
             if getattr(self.settings, 'fixed_trade_amount_enabled', False):
-                # Fixed amount represents total trading capital
-                fixed_total_capital = getattr(self.settings, 'fixed_trade_amount', 100.0)
+                # Use portfolio_value as the total capital
+                fixed_total_capital = portfolio_value
                 
                 # Calculate currently allocated capital from active positions
                 current_allocated = self._calculate_allocated_capital()
@@ -717,11 +717,12 @@ class ScalpingStrategy:
                 # Calculate remaining capital available for new trades
                 remaining_capital = float(fixed_total_capital) - float(current_allocated)
                 
-                # Individual trade is capped at $10 maximum
-                max_individual_trade = 10.0
+                # The trade amount is fixed
+                max_position_value = float(getattr(self.settings, 'fixed_trade_amount', 10.0))
                 
-                # Determine position value: minimum of remaining capital and max individual trade
-                max_position_value = min(remaining_capital, max_individual_trade)
+                # Ensure we do not exceed remaining capital
+                if max_position_value > remaining_capital:
+                    raise OrderExecutionError(f"Insufficient remaining capital for fixed trade amount. Remaining: ${remaining_capital:.2f}, Required: ${max_position_value:.2f}")
                 
                 # Ensure minimum trade amount of $1
                 if max_position_value < 1.0:

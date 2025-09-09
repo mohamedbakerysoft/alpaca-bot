@@ -23,42 +23,39 @@ class ConfigPanel:
     """Configuration panel for trading bot settings."""
     
     def __init__(self, parent: tk.Widget, settings: Settings, on_settings_change: Optional[Callable] = None):
-        """Initialize the configuration panel.
+        """Initialize ConfigPanel.
         
         Args:
-            parent: Parent widget (can be a notebook or regular frame).
+            parent: Parent widget.
             settings: Settings instance.
-            on_settings_change: Callback for when settings change.
+            on_settings_change: Callback for settings changes.
         """
-        self.logger = get_logger(__name__)
+        self.parent = parent
         self.settings = settings
         self.on_settings_change = on_settings_change
+        self.logger = logging.getLogger(__name__)
+        self.initializing = True
         
-        # Check if parent is a notebook
         self.is_notebook_parent = isinstance(parent, ttk.Notebook)
         
         if self.is_notebook_parent:
-            # Parent is a notebook, we'll add tabs directly to it
             self.notebook = parent
+            self.frame = ttk.Frame(parent)
         else:
-            # Create main frame for standalone use
-            self.frame = ttk.LabelFrame(parent, text="Configuration", padding=10)
-            self.frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            self.frame = ttk.Frame(parent)
+            self.frame.pack(fill=tk.BOTH, expand=True)
+            self.notebook = ttk.Notebook(self.frame)
+            self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            
+        self.config_vars: Dict[str, tk.Variable] = {}
         
-        # Create custom styles for visual indicators
-        self.style = ttk.Style()
-        self.style.configure('Active.TEntry', fieldbackground='#e8f5e8', bordercolor='#4CAF50')
-        
-        # Configuration variables
-        self.config_vars = {}
         self._create_config_vars()
-        
-        # Create widgets
         self._create_widgets()
-        
-        # Load current settings
         self._load_settings()
-    
+        
+        self.logger.info("ConfigPanel initialized")
+        self.initializing = False
+
     def _create_config_vars(self) -> None:
         """Create tkinter variables for configuration."""
         # Strategy parameters
@@ -89,12 +86,12 @@ class ConfigPanel:
             'max_position_size': tk.DoubleVar(value=10000.0),
             
             # Fixed Trade Amount Feature
-            'fixed_trade_amount_enabled': tk.BooleanVar(value=False),
-            'fixed_trade_amount': tk.DoubleVar(value=100.0),
+            'fixed_trade_amount_enabled': tk.BooleanVar(value=self.settings.fixed_trade_amount_enabled),
+            'fixed_trade_amount': tk.DoubleVar(value=self.settings.fixed_trade_amount),
             
             # Custom Portfolio Value Feature
-            'custom_portfolio_value_enabled': tk.BooleanVar(value=False),
-            'custom_portfolio_value': tk.DoubleVar(value=10000.0),
+            'custom_portfolio_value_enabled': tk.BooleanVar(value=self.settings.custom_portfolio_value_enabled),
+            'custom_portfolio_value': tk.DoubleVar(value=self.settings.custom_portfolio_value),
             
             # Risk management
             'stop_loss_percent': tk.DoubleVar(value=2.0),
@@ -731,7 +728,7 @@ class ConfigPanel:
             self.logger.info("Fixed trade amount feature deactivated")
         
         # Notify of settings change without saving
-        if self.on_settings_change:
+        if not self.initializing and self.on_settings_change:
             config_dict = self._get_current_config()
             self.on_settings_change(config_dict)
     
@@ -783,7 +780,7 @@ class ConfigPanel:
             self.logger.info("Custom portfolio value feature deactivated")
         
         # Notify of settings change without saving
-        if self.on_settings_change:
+        if not self.initializing and self.on_settings_change:
             config_dict = self._get_current_config()
             self.on_settings_change(config_dict)
      
