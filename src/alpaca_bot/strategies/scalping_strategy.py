@@ -1071,11 +1071,20 @@ class ScalpingStrategy:
         
         # Partial profit-taking logic
         if self.partial_profit_taking_enabled:
+            # Get current partial profit progress for this symbol
+            current_progress = self.partial_profit_progress.get(symbol, 0)
+            self.logger.debug(f"Checking partial profit for {symbol}: P&L={pnl_pct:.3%}, current_progress={current_progress}")
             for i, tier in enumerate(self.partial_profit_tiers):
-                if pnl_pct >= tier['profit_pct'] and position.partial_profit_progress < (i + 1):
+                tier_number = i + 1
+                self.logger.debug(f"Tier {tier_number}: target={tier['profit_pct']:.3%}, fraction={tier['sell_fraction']}, executed={current_progress >= tier_number}")
+                if pnl_pct >= tier['profit_pct'] and current_progress < tier_number:
                     sell_fraction = tier['sell_fraction']
-                    reason = f"Partial profit tier {i+1} reached at {pnl_pct:.2%}"
+                    reason = f"Partial profit tier {tier_number} reached at {pnl_pct:.2%}"
+                    self.logger.info(f"Partial profit target reached for {symbol}: {pnl_pct:.3%} >= {tier['profit_pct']:.3%}")
                     trade_logger.log_trade_signal(symbol, "PARTIAL_SELL", current_price, reason)
+                    # Update progress to mark this tier as executed
+                    self.partial_profit_progress[symbol] = tier_number
+                    self.logger.info(f"Partial sell triggered for {symbol}: tier {tier_number}, progress updated to {tier_number}")
                     return ("PARTIAL_SELL", reason, sell_fraction)
 
         if current_price is not None:
@@ -1200,7 +1209,7 @@ class ScalpingStrategy:
                     status=TradeStatus.FILLED
                 )
                 self.active_positions[symbol] = trade
-                self.partial_profit_progress[symbol] = -1 # Initialize progress
+                self.partial_profit_progress[symbol] = 0 # Initialize progress (0 = no tiers executed yet)
                 
                 trade_logger.log_position_opened(symbol, quantity, fill_price)
                 
