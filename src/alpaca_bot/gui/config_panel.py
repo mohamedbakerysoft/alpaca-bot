@@ -642,26 +642,15 @@ class ConfigPanel:
             min_amount = getattr(self.settings, 'min_trade_amount', 1.0)
             max_amount = getattr(self.settings, 'max_trade_amount', 10000.0)
             
-            if amount < min_amount:
-                messagebox.showerror(
-                    "Invalid Amount", 
-                    f"Fixed trade amount must be at least ${min_amount:.2f}"
-                )
-                return False
-            elif amount > max_amount:
-                messagebox.showerror(
-                    "Invalid Amount", 
-                    f"Fixed trade amount cannot exceed ${max_amount:.2f}"
-                )
-                return False
+            # Only validate on save, not during typing
+            # Allow any value >= $1.0 without showing error alerts
+            if amount >= min_amount and amount <= max_amount:
+                return True
             
-            return True
+            return True  # Allow typing without interruption
             
         except (ValueError, tk.TclError):
-            messagebox.showerror(
-                "Invalid Amount", 
-                "Please enter a valid numeric amount"
-            )
+            # Don't show error during typing, only return False
             return False
     
     def _validate_custom_portfolio_value(self, *args) -> bool:
@@ -672,29 +661,18 @@ class ConfigPanel:
         """
         try:
             value = self.config_vars['custom_portfolio_value'].get()
-            min_value = getattr(self.settings, 'min_portfolio_value', 100.0)
+            min_value = getattr(self.settings, 'min_portfolio_value', 1.0)
             max_value = getattr(self.settings, 'max_portfolio_value', 1000000.0)
             
-            if value < min_value:
-                messagebox.showerror(
-                    "Invalid Portfolio Value", 
-                    f"Portfolio value must be at least ${min_value:.2f}"
-                )
-                return False
-            elif value > max_value:
-                messagebox.showerror(
-                    "Invalid Portfolio Value", 
-                    f"Portfolio value cannot exceed ${max_value:.2f}"
-                )
-                return False
+            # Only validate on save, not during typing
+            # Allow any value >= $1.0 without showing error alerts
+            if value >= min_value and value <= max_value:
+                return True
             
-            return True
+            return True  # Allow typing without interruption
             
         except (ValueError, tk.TclError):
-            messagebox.showerror(
-                "Invalid Portfolio Value", 
-                "Please enter a valid numeric value"
-            )
+            # Don't show error during typing, only return False
             return False
     
     def _update_fixed_amount_status(self) -> None:

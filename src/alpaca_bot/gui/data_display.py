@@ -290,14 +290,24 @@ class DataDisplay:
         position_list_frame = ttk.Frame(position_frame)
         position_list_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Create treeview for positions
-        columns = ('Symbol', 'Quantity', 'Avg Price', 'Current Price', 'P&L', 'P&L %')
+        # Create treeview for positions with dollar value column
+        columns = ('Symbol', 'Dollar Value', 'Shares', 'Avg Price', 'Current Price', 'P&L', 'P&L %')
         self.position_tree = ttk.Treeview(position_list_frame, columns=columns, show='headings', height=6)
         
-        # Configure columns
+        # Configure columns with appropriate widths
+        column_widths = {
+            'Symbol': 80,
+            'Dollar Value': 100,
+            'Shares': 80,
+            'Avg Price': 90,
+            'Current Price': 90,
+            'P&L': 80,
+            'P&L %': 70
+        }
+        
         for col in columns:
             self.position_tree.heading(col, text=col)
-            self.position_tree.column(col, width=100, anchor=tk.CENTER)
+            self.position_tree.column(col, width=column_widths.get(col, 100), anchor=tk.CENTER)
         
         # Add scrollbar
         position_scrollbar = ttk.Scrollbar(position_list_frame, orient=tk.VERTICAL, command=self.position_tree.yview)
@@ -428,9 +438,13 @@ class DataDisplay:
                     pnl = 0.0
                     pnl_pct = 0.0
                 
-                # Format values
+                # Calculate dollar value of position
+                dollar_value = abs(position.quantity) * current_price if current_price is not None else 0.0
+                
+                # Format values with dollar value as primary display
                 values = (
                     position.symbol,
+                    f"${dollar_value:,.2f}",
                     f"{position.quantity:,}",
                     f"${position.avg_price:.2f}",
                     f"${current_price:.2f}",

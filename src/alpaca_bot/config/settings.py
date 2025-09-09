@@ -126,7 +126,7 @@ class Settings:
         )
         self.min_portfolio_value: float = config(
             "MIN_PORTFOLIO_VALUE",
-            default=100.0,
+            default=1.0,
             cast=float
         )
         self.max_portfolio_value: float = config(

@@ -257,13 +257,24 @@ class MainWindow:
         Args:
             parent: Parent frame.
         """
-        # Positions treeview
-        columns = ('Symbol', 'Quantity', 'Entry Price', 'Current Price', 'P&L', 'P&L %')
+        # Positions treeview with dollar value column
+        columns = ('Symbol', 'Dollar Value', 'Shares', 'Entry Price', 'Current Price', 'P&L', 'P&L %')
         self.positions_tree = ttk.Treeview(parent, columns=columns, show='headings')
+        
+        # Configure column widths
+        column_widths = {
+            'Symbol': 80,
+            'Dollar Value': 100,
+            'Shares': 80,
+            'Entry Price': 90,
+            'Current Price': 90,
+            'P&L': 80,
+            'P&L %': 70
+        }
         
         for col in columns:
             self.positions_tree.heading(col, text=col)
-            self.positions_tree.column(col, width=100, anchor=tk.CENTER)
+            self.positions_tree.column(col, width=column_widths.get(col, 100), anchor=tk.CENTER)
         
         # Scrollbar for positions
         pos_scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=self.positions_tree.yview)
@@ -745,9 +756,13 @@ class MainWindow:
                         unrealized_pnl = float(position.unrealized_pl) if position.unrealized_pl is not None else 0.0
                         unrealized_pnl_pct = float(position.unrealized_plpc) * 100 if position.unrealized_plpc is not None else 0.0
                         
-                        # Insert into treeview
+                        # Calculate dollar value of position
+                        dollar_value = abs(quantity) * current_price
+                        
+                        # Insert into treeview with dollar value as primary display
                         self.positions_tree.insert('', 'end', values=(
                             symbol,
+                            f"${dollar_value:,.2f}",
                             f"{float(quantity):.6f}".rstrip('0').rstrip('.'),
                             f"${avg_price:.2f}",
                             f"${current_price:.2f}",
@@ -782,13 +797,17 @@ class MainWindow:
                                 pnl_pct = 0.0
                                 current_price = trade.entry_price if trade.entry_price is not None else 0.0
                             
-                            # Insert into treeview with safe formatting
+                            # Insert into treeview with safe formatting and dollar value
                             entry_price_str = f"${trade.entry_price:.2f}" if trade.entry_price is not None else "$0.00"
                             current_price_str = f"${current_price:.2f}" if current_price is not None else "$0.00"
                             quantity_str = f"{trade.quantity:.6f}".rstrip('0').rstrip('.') if trade.quantity is not None else "0"
                             
+                            # Calculate dollar value of position
+                            dollar_value = abs(trade.quantity) * current_price if trade.quantity is not None and current_price is not None else 0.0
+                            
                             self.positions_tree.insert('', 'end', values=(
                                 symbol,
+                                f"${dollar_value:,.2f}",
                                 quantity_str,
                                 entry_price_str,
                                 current_price_str,
