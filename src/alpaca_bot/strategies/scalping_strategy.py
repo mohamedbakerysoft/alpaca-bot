@@ -183,10 +183,8 @@ class ScalpingStrategy:
         # Partial profit-taking configuration
         self.partial_profit_taking_enabled = True
         self.partial_profit_tiers = [
-            (0.0003, 0.05),  # Sell 5% at 0.03% profit
-            (0.0006, 0.10),  # Sell 10% at 0.06% profit
-            (0.0010, 0.15),  # Sell 15% at 0.10% profit
-            (0.0015, 0.20),  # Sell 20% at 0.15% profit
+            {'profit_pct': 0.003, 'sell_fraction': 0.25},
+            {'profit_pct': 0.006, 'sell_fraction': 0.50},
         ]
         
         # Trading mode parameters
@@ -947,12 +945,23 @@ class ScalpingStrategy:
         Returns:
             Trade object if successful, None otherwise.
         """
+        # Check if we have a position
+        if symbol not in self.active_positions:
+            self.logger.warning(f"No active position for {symbol}")
+            return None
+        
+        position_trade = self.active_positions[symbol]
+        
+        # Calculate quantity to sell based on sell_fraction
+        total_quantity = position_trade.quantity
+        quantity_to_sell = total_quantity * sell_fraction
+        
+        # Ensure we have a minimum quantity to sell
+        if quantity_to_sell < 0.0001:
+            self.logger.warning(f"Calculated sell quantity too small: {quantity_to_sell}")
+            return None
+        
         def _place_sell_order():
-            # Check if we have a position
-            if symbol not in self.active_positions:
-                raise OrderExecutionError(f"No active position for {symbol}")
-            
-            position_trade = self.active_positions[symbol]
             
             # Get current quote for limit price calculation
             quote = self.alpaca_client.get_latest_quote(symbol)
@@ -1041,8 +1050,17 @@ class ScalpingStrategy:
         current_price = stock_data.current_quote.bid
         entry_price = position.price
         
+        # Ensure both prices are valid numbers
         if current_price is None or entry_price is None:
             self.logger.debug(f"{symbol}: Invalid price data - current: {current_price}, entry: {entry_price}")
+            return None
+            
+        # Convert to float to ensure proper arithmetic
+        try:
+            current_price = float(current_price)
+            entry_price = float(entry_price)
+        except (ValueError, TypeError) as e:
+            self.logger.debug(f"{symbol}: Price conversion error - current: {current_price}, entry: {entry_price}, error: {e}")
             return None
         
         if entry_price != 0:
@@ -1052,7 +1070,7 @@ class ScalpingStrategy:
             pnl_pct = 0.0
         
         # Partial profit-taking logic
-        if self.partial_profit_enabled:
+        if self.partial_profit_taking_enabled:
             for i, tier in enumerate(self.partial_profit_tiers):
                 if pnl_pct >= tier['profit_pct'] and position.partial_profit_progress < (i + 1):
                     sell_fraction = tier['sell_fraction']
