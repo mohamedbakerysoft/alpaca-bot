@@ -8,20 +8,30 @@ This module provides:
 """
 
 import sys
+import os
 import logging
 import threading
 import time
 import signal
 from pathlib import Path
+from typing import Optional
 
-from .config.settings import Settings
-from .utils.logging_utils import setup_logging
-from .utils.error_handler import (
-    ErrorHandler, TradingBotError, APIConnectionError,
-    ConfigurationError, safe_execute
-)
-from .services.alpaca_client import AlpacaClient
-from .strategies.scalping_strategy import ScalpingStrategy
+# Add the project root to Python path
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(project_root / "src"))
+
+try:
+    from alpaca_bot.config.settings import Settings
+    from alpaca_bot.services.alpaca_service import AlpacaService
+    from alpaca_bot.services.trading_service import TradingService
+    from alpaca_bot.utils.logger import setup_logging
+    from alpaca_bot.models.trading_mode import TradingMode
+except ImportError as e:
+    print(f"Import error: {e}")
+    print("Current working directory:", os.getcwd())
+    print("Python path:", sys.path)
+    sys.exit(1)
 
 
 class HeadlessTradingBot:
