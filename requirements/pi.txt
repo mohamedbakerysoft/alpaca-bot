@@ -1,0 +1,86 @@
+# Alpaca Bot - Raspberry Pi Requirements
+# Optimized for ARM architecture and limited resources
+
+# Core trading dependencies (compatible versions)
+alpaca-trade-api==3.1.1
+aiohttp==3.8.2  # Compatible with alpaca-trade-api
+pandas==2.0.3  # Lighter than latest versions
+numpy==1.24.4  # ARM-optimized version
+tkinter-tooltip==2.1.0
+Pillow==10.1.0
+
+# Visualization (lightweight)
+matplotlib==3.7.2  # Lighter version
+seaborn==0.12.2
+
+# Configuration and utilities
+python-decouple==3.8
+requests==2.31.0
+python-dateutil==2.8.2
+coloredlogs==15.0.1
+websocket-client==1.6.4
+
+# Technical analysis (if available for ARM)
+# TA-Lib==0.4.28  # Comment out if build fails
+
+# Async support
+aiofiles==23.2.1
+
+# Pi-specific optimizations
+psutil==5.9.6  # System monitoring
+RPi.GPIO==0.7.1  # GPIO control for status LEDs
+gpiozero==1.6.2  # Simplified GPIO interface
+
+# System monitoring and management
+py-cpuinfo==9.0.0  # CPU information
+
+# Logging and monitoring
+loguru==0.7.2  # Better logging for Pi
+watchdog==3.0.0  # File system monitoring
+
+# Network and connectivity
+urllib3==1.26.20  # Compatible version
+
+# Time and scheduling
+schedule==1.2.0
+pytz==2023.3
+
+# Configuration management
+python-decouple==3.8
+python-dotenv==1.0.0
+
+# Error handling and retry logic
+tenacity==8.2.3
+
+# Health monitoring
+flask==2.3.3  # For health check endpoint
+werkzeug==2.3.7
+
+# Backup and data management
+# shutil and tarfile are built-in modules, no need to install
+
+# Performance monitoring
+memory-profiler==0.61.0
+
+# Pi hardware specific
+pigpio==1.78  # Alternative GPIO library
+w1thermsensor==2.0.0  # Temperature sensors (optional)
+
+# Lightweight web framework for monitoring dashboard (optional)
+flask-cors==4.0.0
+
+# JSON handling
+orjson==3.9.10  # Faster JSON processing
+
+# Async support (already included above)
+# aiohttp==3.8.2 (already specified above)
+# aiofiles==23.2.1 (already specified above)
+
+# Security
+cryptography==41.0.7
+
+# Development and debugging (remove in production)
+# pytest==7.4.3
+# pytest-cov==4.1.0
+# black==23.11.0
+# flake8==6.1.0
