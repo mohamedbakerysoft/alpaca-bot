@@ -176,15 +176,16 @@ class ScalpingStrategy:
         
         # Enhanced exit parameters
         self.trailing_stop_enabled = True
-        self.trailing_stop_pct = 0.01  # 1% trailing stop
-        self.min_profit_for_trailing = 0.005  # 0.5% minimum profit before enabling trailing
+        self.trailing_stop_pct = 0.008  # 0.8% trailing stop (tighter)
+        self.min_profit_for_trailing = 0.003  # 0.3% minimum profit before enabling trailing
         self.dynamic_exit_enabled = True
 
         # Partial profit-taking configuration
         self.partial_profit_taking_enabled = True
         self.partial_profit_tiers = [
-            {'profit_pct': 0.003, 'sell_fraction': 0.25},
-            {'profit_pct': 0.006, 'sell_fraction': 0.50},
+            {'profit_pct': 0.002, 'sell_fraction': 0.30},  # 0.2% profit, sell 30%
+            {'profit_pct': 0.004, 'sell_fraction': 0.40},  # 0.4% profit, sell 40%
+            {'profit_pct': 0.008, 'sell_fraction': 0.30},  # 0.8% profit, sell remaining 30%
         ]
         
         # Trading mode parameters
@@ -352,7 +353,7 @@ class ScalpingStrategy:
             self.resistance_threshold = 0.005  # Tighter resistance threshold (0.5%)
             self.trailing_stop_pct = 0.008  # Tighter trailing stop (0.8%)
             self.min_profit_for_trailing = 0.003  # Lower threshold for trailing (0.3%)
-            self.min_buy_score = 2  # Lower confidence requirement
+            self.min_buy_score = 1  # Very low confidence requirement for maximum trading opportunities
             self.logger.info(f"Aggressive mode enabled - Portfolio: ${portfolio_value:.2f}, Max position: ${mode_params['max_position_value']:.2f}, Max trades: {mode_params['max_daily_trades']}")
         else:  # CONSERVATIVE
             self.support_threshold = getattr(self.settings, 'support_threshold', 0.01)
