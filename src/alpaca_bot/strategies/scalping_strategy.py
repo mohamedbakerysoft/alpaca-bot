@@ -54,37 +54,37 @@ class TradingMode(Enum):
         # Base parameters for each mode
         base_params = {
             cls.ULTRA_SAFE: {
-                'position_size_multiplier': 0.3,
-                'stop_loss_pct': 0.005,
-                'take_profit_pct': 0.01,
-                'max_daily_trades': 3,
-                'min_rsi_oversold': 25,
-                'max_rsi_overbought': 75,
-                'volatility_threshold': 0.02,
-                'min_volume': 1000000,
-                'max_position_value_pct': 0.25,  # 25% of portfolio
+                'position_size_multiplier': 0.5,  # Increased for better position sizes
+                'stop_loss_pct': 0.015,  # Wider stop loss to avoid premature exits
+                'take_profit_pct': 0.025,  # Higher take profit for better rewards
+                'max_daily_trades': 8,  # More trades for better opportunities
+                'min_rsi_oversold': 30,  # More relaxed for more entries
+                'max_rsi_overbought': 70,  # More relaxed for better exits
+                'volatility_threshold': 0.03,  # Allow more volatile stocks
+                'min_volume': 500000,  # Lower volume requirement
+                'max_position_value_pct': 0.35,  # Larger positions
             },
             cls.CONSERVATIVE: {
-                'position_size_multiplier': 0.5,
-                'stop_loss_pct': 0.01,
-                'take_profit_pct': 0.02,
-                'max_daily_trades': 5,
-                'min_rsi_oversold': 30,
-                'max_rsi_overbought': 70,
-                'volatility_threshold': 0.03,
-                'min_volume': 500000,
-                'max_position_value_pct': 0.4,  # 40% of portfolio
+                'position_size_multiplier': 0.8,  # Increased for better position sizes
+                'stop_loss_pct': 0.02,  # Wider stop loss
+                'take_profit_pct': 0.035,  # Higher take profit
+                'max_daily_trades': 12,  # More trades
+                'min_rsi_oversold': 35,  # More relaxed
+                'max_rsi_overbought': 65,  # More relaxed
+                'volatility_threshold': 0.04,  # Allow more volatility
+                'min_volume': 250000,  # Lower volume requirement
+                'max_position_value_pct': 0.5,  # Larger positions
             },
             cls.AGGRESSIVE: {
-                'position_size_multiplier': 1.0,
-                'stop_loss_pct': 0.015,
-                'take_profit_pct': 0.03,
-                'max_daily_trades': 15,
-                'min_rsi_oversold': 35,
-                'max_rsi_overbought': 65,
-                'volatility_threshold': 0.05,
-                'min_volume': 250000,
-                'max_position_value_pct': 0.6,  # 60% of portfolio
+                'position_size_multiplier': 1.2,  # Even larger positions
+                'stop_loss_pct': 0.025,  # Wider stop loss
+                'take_profit_pct': 0.05,  # Much higher take profit
+                'max_daily_trades': 20,  # Maximum trades
+                'min_rsi_oversold': 40,  # Very relaxed
+                'max_rsi_overbought': 60,  # Very relaxed
+                'volatility_threshold': 0.06,  # High volatility allowed
+                'min_volume': 100000,  # Very low volume requirement
+                'max_position_value_pct': 0.7,  # Large positions
             }
         }
         
@@ -693,10 +693,10 @@ class ScalpingStrategy:
         self.logger.info(f"{symbol}: Buy conditions met: {len(buy_conditions)} (score: {total_score}/{min_score}) - {buy_conditions}")
         self.logger.debug(f"{symbol}: Signal types - Support/Technical: {has_support_signal}, Momentum: {has_momentum_signal}, Volume: {has_volume_signal}")
         
-        # Generate buy signal if enhanced conditions are met
-        # Require at least 3 conditions with minimum score, including momentum and volume confirmation
-        if (len(buy_conditions) >= 3 and total_score >= min_score and 
-            has_support_signal and (has_momentum_signal or has_volume_signal)):
+        # Generate buy signal with more relaxed conditions for better opportunities
+        # Require at least 2 conditions with lower minimum score
+        if (len(buy_conditions) >= 2 and total_score >= max(2, min_score - 2) and 
+            has_support_signal):  # Only require support signal, not momentum/volume
             reason = "; ".join(buy_conditions)
             signals.append(("BUY", reason))
             trade_logger.log_trade_signal(symbol, "BUY", current_price, reason)
@@ -1106,14 +1106,17 @@ class ScalpingStrategy:
             if pnl_pct <= -self.stop_loss_pct:
                 return ("SELL", f"Stop loss triggered ({pnl_pct:.2%})", 1.0)
         
-        # Dynamic take profit based on volatility and momentum
+        # More conservative take profit - allow profits to run longer
         if self.dynamic_exit_enabled:
             dynamic_take_profit = self._calculate_dynamic_take_profit(stock_data, pnl_pct)
-            if pnl_pct >= dynamic_take_profit:
-                return ("SELL", f"Dynamic take profit triggered ({pnl_pct:.2%}, target: {dynamic_take_profit:.2%})", 1.0)
+            # Increase dynamic take profit by 50% to let profits run
+            adjusted_take_profit = dynamic_take_profit * 1.5
+            if pnl_pct >= adjusted_take_profit:
+                return ("SELL", f"Dynamic take profit triggered ({pnl_pct:.2%}, target: {adjusted_take_profit:.2%})", 1.0)
         else:
-            # Standard take profit condition
-            if pnl_pct >= self.take_profit_pct:
+            # Increase standard take profit threshold by 50%
+            adjusted_take_profit = self.take_profit_pct * 1.5
+            if pnl_pct >= adjusted_take_profit:
                 return ("SELL", f"Take profit triggered ({pnl_pct:.2%})", 1.0)
         
         # Enhanced resistance level condition with momentum check
@@ -1130,16 +1133,16 @@ class ScalpingStrategy:
                 self.logger.debug(f"{symbol}: Error calculating resistance distance: {e}")
                 pass
         
-        # RSI overbought condition with stricter threshold when profitable
+        # More relaxed RSI overbought condition to avoid premature exits
         if stock_data.technical_indicators is None:
             return None
         
         rsi = stock_data.technical_indicators.rsi
         if rsi:
-            # Use stricter RSI threshold when in profit
-            rsi_threshold = self.rsi_overbought - 5 if pnl_pct > 0.01 else self.rsi_overbought
-            if rsi >= rsi_threshold:
-                return ("SELL", f"RSI overbought ({rsi:.1f}, threshold: {rsi_threshold:.1f})", 1.0)
+            # Use more relaxed RSI threshold - only exit on extreme overbought
+            rsi_threshold = self.rsi_overbought + 10  # More conservative exit
+            if rsi >= rsi_threshold and pnl_pct > 0.005:  # Only if profitable
+                return ("SELL", f"RSI extremely overbought ({rsi:.1f}, threshold: {rsi_threshold:.1f})", 1.0)
         
         # Upper Bollinger Band condition with volume confirmation
         bb_upper = stock_data.technical_indicators.bollinger_upper

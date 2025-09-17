@@ -62,25 +62,25 @@ class Settings:
             cast=int
         )
         
-        # Strategy Parameters
+        # Strategy Parameters - Optimized for better performance
         self.default_position_size: float = config(
             "DEFAULT_POSITION_SIZE",
-            default=1000.0,
+            default=50.0,
             cast=float
         )
         self.support_threshold: float = config(
             "SUPPORT_THRESHOLD",
-            default=0.02,
+            default=0.005,
             cast=float
         )
         self.resistance_threshold: float = config(
             "RESISTANCE_THRESHOLD",
-            default=0.015,
+            default=0.008,
             cast=float
         )
         self.stop_loss_percentage: float = config(
             "STOP_LOSS_PERCENTAGE",
-            default=0.01,
+            default=0.02,
             cast=float
         )
         
