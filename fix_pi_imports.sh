@@ -74,7 +74,8 @@ main() {
 cd $REMOTE_DIR
 source $VENV_NAME/bin/activate
 export DISPLAY=:0
-python src/alpaca_bot/main.py
+export PYTHONPATH=\$PWD/src:\$PYTHONPATH
+python -m alpaca_bot.main
 SCRIPT_EOF"
     
     # Make the script executable
@@ -94,7 +95,7 @@ User=$PI_USER
 WorkingDirectory=$REMOTE_DIR
 Environment=DISPLAY=:0
 Environment=PYTHONPATH=$REMOTE_DIR/src
-ExecStart=$REMOTE_DIR/$VENV_NAME/bin/python src/alpaca_bot/main.py
+ExecStart=$REMOTE_DIR/$VENV_NAME/bin/python -m alpaca_bot.main
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -115,7 +116,7 @@ SERVICE_EOF"
     
     # Test GUI imports
     log_info "Testing GUI imports on Pi..."
-    if ssh "$PI_USER@$PI_HOST" "cd $REMOTE_DIR && source $VENV_NAME/bin/activate && python -c 'import sys; sys.path.insert(0, \"src\"); from alpaca_bot.main import main; print(\"GUI imports successful!\")'"; then
+    if ssh "$PI_USER@$PI_HOST" "cd $REMOTE_DIR && source $VENV_NAME/bin/activate && export PYTHONPATH=\$PWD/src:\$PYTHONPATH && python -c 'from alpaca_bot.main import main; print(\"GUI imports successful!\")'"; then
         log_success "GUI imports test passed!"
     else
         log_error "GUI imports test failed!"
