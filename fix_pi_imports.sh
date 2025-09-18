@@ -1,9 +1,15 @@
 #!/bin/bash
 
-# Quick fix script for Raspberry Pi import issue
-# This script updates the existing Pi installation to use main_headless.py instead of main.py
+# Alpaca Bot - Pi GUI Deployment Fix Script
+# This script deploys the GUI version (main.py) to the Raspberry Pi
 
 set -e  # Exit on any error
+
+# Configuration
+PI_USER="jarvis"
+PI_HOST="jarvis.local"
+REMOTE_DIR="/home/jarvis/alpaca-bot"
+VENV_NAME="alpaca-venv"
 
 # Colors for output
 RED='\033[0;31m'
@@ -11,12 +17,6 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
-
-# Configuration
-PI_USER="jarvis"
-PI_HOST="jarvis.local"
-REMOTE_DIR="/home/jarvis/alpaca-bot"
-VENV_NAME="alpaca-venv"
 
 # Logging functions
 log_info() {
@@ -46,71 +46,106 @@ check_connection() {
     fi
 }
 
-# Fix the scripts and service on Pi
-fix_pi_installation() {
-    log_info "Fixing Pi installation to use main_headless.py..."
+# Main deployment function
+main() {
+    log_info "Starting GUI version deployment to Raspberry Pi..."
     
-    ssh "$PI_USER@$PI_HOST" << EOF
-        cd $REMOTE_DIR
-        
-        # Stop the service if it's running
-        sudo systemctl stop alpaca-bot.service 2>/dev/null || true
-        
-        # Update start_bot.sh script
-        cat > start_bot.sh << 'SCRIPT_EOF'
+    # Check connection
+    check_connection
+    
+    # Copy the GUI main.py file to the Pi
+    log_info "Deploying GUI version (main.py)..."
+    scp "src/alpaca_bot/main.py" "$PI_USER@$PI_HOST:$REMOTE_DIR/src/alpaca_bot/"
+    
+    # Copy the entire GUI directory
+    log_info "Copying GUI components..."
+    scp -r "src/alpaca_bot/gui" "$PI_USER@$PI_HOST:$REMOTE_DIR/src/alpaca_bot/"
+    
+    # Copy environment file
+    if [ -f ".env.pi" ]; then
+        log_info "Copying Pi environment configuration..."
+        scp ".env.pi" "$PI_USER@$PI_HOST:$REMOTE_DIR/.env"
+    fi
+    
+    # Update start_bot.sh to use GUI version
+    log_info "Creating startup script for GUI mode..."
+    ssh "$PI_USER@$PI_HOST" "cd $REMOTE_DIR && cat > start_bot.sh << 'SCRIPT_EOF'
 #!/bin/bash
 cd $REMOTE_DIR
 source $VENV_NAME/bin/activate
-python src/alpaca_bot/main_headless.py
-SCRIPT_EOF
-        
-        # Make it executable
-        chmod +x start_bot.sh
-        
-        # Update systemd service file
-        sudo tee /etc/systemd/system/alpaca-bot.service > /dev/null << 'SERVICE_EOF'
+export DISPLAY=:0
+python src/alpaca_bot/main.py
+SCRIPT_EOF"
+    
+    # Make the script executable
+    ssh "$PI_USER@$PI_HOST" "chmod +x $REMOTE_DIR/start_bot.sh"
+    
+    # Update systemd service for GUI mode
+    log_info "Updating systemd service for GUI mode..."
+    ssh "$PI_USER@$PI_HOST" "sudo tee /etc/systemd/system/alpaca-bot.service > /dev/null << 'SERVICE_EOF'
 [Unit]
-Description=Alpaca Trading Bot
-After=network.target
+Description=Alpaca Trading Bot (GUI Mode)
+After=network.target graphical-session.target
+Wants=graphical-session.target
 
 [Service]
 Type=simple
 User=$PI_USER
 WorkingDirectory=$REMOTE_DIR
-Environment=PATH=$REMOTE_DIR/$VENV_NAME/bin
-ExecStart=$REMOTE_DIR/$VENV_NAME/bin/python src/alpaca_bot/main_headless.py
+Environment=DISPLAY=:0
+Environment=PYTHONPATH=$REMOTE_DIR/src
+ExecStart=$REMOTE_DIR/$VENV_NAME/bin/python src/alpaca_bot/main.py
 Restart=always
 RestartSec=10
+StandardOutput=journal
+StandardError=journal
 
 [Install]
-WantedBy=multi-user.target
-SERVICE_EOF
-        
-        # Reload systemd and enable the service
-        sudo systemctl daemon-reload
-        sudo systemctl enable alpaca-bot.service
-        
-        echo "Fix completed successfully!"
-EOF
+WantedBy=graphical.target
+SERVICE_EOF"
     
-    log_success "Pi installation fixed successfully!"
-}
-
-# Main function
-main() {
-    log_info "Starting Pi import fix..."
+    # Stop the service if it's running
+    log_info "Stopping existing service..."
+    ssh "$PI_USER@$PI_HOST" "sudo systemctl stop alpaca-bot.service || true"
     
-    check_connection
-    fix_pi_installation
+    # Reload systemd and enable the service
+    log_info "Reloading systemd configuration..."
+    ssh "$PI_USER@$PI_HOST" "sudo systemctl daemon-reload"
+    ssh "$PI_USER@$PI_HOST" "sudo systemctl enable alpaca-bot.service"
     
-    log_success "Fix completed successfully!"
-    echo
+    # Test GUI imports
+    log_info "Testing GUI imports on Pi..."
+    if ssh "$PI_USER@$PI_HOST" "cd $REMOTE_DIR && source $VENV_NAME/bin/activate && python -c 'import sys; sys.path.insert(0, \"src\"); from alpaca_bot.main import main; print(\"GUI imports successful!\")'"; then
+        log_success "GUI imports test passed!"
+    else
+        log_error "GUI imports test failed!"
+        exit 1
+    fi
+    
+    # Check if X11 is available for GUI
+    log_info "Checking X11 display availability..."
+    if ssh "$PI_USER@$PI_HOST" "DISPLAY=:0 xset q >/dev/null 2>&1"; then
+        log_success "X11 display is available for GUI"
+    else
+        log_warning "X11 display not available. You may need to:"
+        log_warning "1. Enable desktop environment on Pi"
+        log_warning "2. Set up VNC or connect a monitor"
+        log_warning "3. Use 'export DISPLAY=:0' before running"
+    fi
+    
+    log_success "GUI deployment completed successfully!"
+    echo ""
     log_info "Next steps:"
-    echo "1. SSH to your Pi: ssh $PI_USER@$PI_HOST"
-    echo "2. Test the fix: cd $REMOTE_DIR && ./start_bot.sh"
-    echo "3. If working, start the service: sudo systemctl start alpaca-bot.service"
+    echo "1. Connect to your Pi via SSH or VNC"
+    echo "2. Test the GUI: cd $REMOTE_DIR && ./start_bot.sh"
+    echo "3. Start the service: sudo systemctl start alpaca-bot.service"
     echo "4. Check status: sudo systemctl status alpaca-bot.service"
+    echo ""
+    log_info "For GUI access, ensure you have:"
+    echo "- A desktop environment running on the Pi"
+    echo "- VNC enabled, or a monitor connected"
+    echo "- X11 forwarding enabled for SSH (ssh -X)"
 }
 
-# Run main function
+# Run the main function
 main "$@"
