@@ -172,12 +172,22 @@ class ScalpingStrategy:
         self.rsi_overbought = getattr(settings, 'rsi_overbought', 70.0)
         self.position_size = getattr(settings, 'position_size', settings.default_position_size)
         self.stop_loss_pct = settings.stop_loss_percentage
-        self.take_profit_pct = getattr(settings, 'take_profit_percentage', 0.02)
+        self.take_profit_pct = getattr(settings, 'take_profit_percentage', 0.05)  # Updated default
+        
+        # Enhanced risk management parameters
+        self.max_daily_loss_pct = getattr(settings, 'max_daily_loss_percentage', 0.05)
+        self.max_daily_trades = getattr(settings, 'max_daily_trades', 10)
+        self.max_position_pct = getattr(settings, 'max_position_percentage', 0.02)
+        
+        # Daily tracking variables
+        self.daily_trades_count = 0
+        self.daily_pnl = 0.0
+        self.last_reset_date = datetime.now().date()
         
         # Enhanced exit parameters
         self.trailing_stop_enabled = True
-        self.trailing_stop_pct = 0.008  # 0.8% trailing stop (tighter)
-        self.min_profit_for_trailing = 0.003  # 0.3% minimum profit before enabling trailing
+        self.trailing_stop_pct = 0.015  # 1.5% trailing stop (more conservative)
+        self.min_profit_for_trailing = 0.005  # 0.5% minimum profit before enabling trailing
         self.dynamic_exit_enabled = True
 
         # Partial profit-taking configuration
@@ -281,6 +291,56 @@ class ScalpingStrategy:
             default_return=None,
             log_errors=True
         )
+    
+    def _reset_daily_counters_if_needed(self) -> None:
+        """Reset daily counters if it's a new trading day."""
+        current_date = datetime.now().date()
+        if current_date != self.last_reset_date:
+            self.daily_trades_count = 0
+            self.daily_pnl = 0.0
+            self.last_reset_date = current_date
+            self.logger.info(f"Daily counters reset for new trading day: {current_date}")
+    
+    def _check_daily_limits(self) -> Tuple[bool, str]:
+        """Check if daily trading limits have been reached.
+        
+        Returns:
+            Tuple[bool, str]: (can_trade, reason_if_cannot)
+        """
+        self._reset_daily_counters_if_needed()
+        
+        # Check daily trade count limit
+        if self.daily_trades_count >= self.max_daily_trades:
+            return False, f"Daily trade limit reached ({self.daily_trades_count}/{self.max_daily_trades})"
+        
+        # Check daily loss limit
+        try:
+            account = self.alpaca_client.get_account()
+            portfolio_value = float(account.portfolio_value)
+            daily_loss_limit = portfolio_value * self.max_daily_loss_pct
+            
+            if self.daily_pnl <= -daily_loss_limit:
+                return False, f"Daily loss limit reached (${self.daily_pnl:.2f} / -${daily_loss_limit:.2f})"
+        except Exception as e:
+            self.logger.warning(f"Could not check daily loss limit: {e}")
+        
+        return True, ""
+    
+    def _update_daily_pnl(self, trade_pnl: float) -> None:
+        """Update daily P&L tracking.
+        
+        Args:
+            trade_pnl: Profit/loss from a completed trade
+        """
+        self._reset_daily_counters_if_needed()
+        self.daily_pnl += trade_pnl
+        self.logger.info(f"Daily P&L updated: ${self.daily_pnl:.2f} (Trade P&L: ${trade_pnl:.2f})")
+    
+    def _increment_daily_trades(self) -> None:
+        """Increment daily trade counter."""
+        self._reset_daily_counters_if_needed()
+        self.daily_trades_count += 1
+        self.logger.info(f"Daily trades count: {self.daily_trades_count}/{self.max_daily_trades}")
     
     def _calculate_allocated_capital(self) -> float:
         """Calculate total capital currently allocated from active positions.
@@ -596,107 +656,57 @@ class ScalpingStrategy:
         self.logger.info(f"{symbol}: Price=${current_price:.2f}, RSI={rsi_str}, SMA20={sma_str}, "
                         f"BB_Lower={bb_lower_str}, Support={support_str}, Resistance={resistance_str}")
         
-        # Enhanced buy signal conditions with volume and momentum confirmation
+        # Simplified buy signal logic - focus on key indicators only
         buy_conditions = []
-        condition_scores = []
+        buy_score = 0
         
-        # Get additional technical indicators for enhanced analysis
-        macd = stock_data.technical_indicators.macd
-        macd_signal = stock_data.technical_indicators.macd_signal
-        macd_histogram = stock_data.technical_indicators.macd_histogram
-        volume_sma = stock_data.technical_indicators.volume_sma
+        # Primary Condition 1: RSI oversold (most reliable)
+        if rsi and rsi <= self.rsi_oversold:
+            buy_conditions.append(f"RSI oversold ({rsi:.1f})")
+            buy_score += 3  # High weight for RSI
         
-        # Get current volume from quote or bars
-        current_volume = None
-        if hasattr(stock_data, 'current_bars') and stock_data.current_bars:
-            current_volume = stock_data.current_bars[-1].volume if stock_data.current_bars else None
-        
-        # Debug logging for technical indicators
-        self.logger.debug(f"{symbol}: MACD={macd}, MACD_Signal={macd_signal}, MACD_Hist={macd_histogram}")
-        self.logger.debug(f"{symbol}: Current_Volume={current_volume}, Volume_SMA={volume_sma}")
-        
-        # Condition 1: Price near support level (High priority)
+        # Primary Condition 2: Price near support level
         if (nearest_support and nearest_support.price is not None and nearest_support.price > 0 and 
             current_price is not None and current_price > 0):
             distance_to_support = abs(current_price - nearest_support.price) / current_price
-            self.logger.debug(f"{symbol}: Distance to support: {distance_to_support:.4f} (threshold: {self.support_threshold})")
             if distance_to_support <= self.support_threshold:
                 buy_conditions.append(f"Near support at ${nearest_support.price:.2f}")
-                condition_scores.append(3)  # High score for support
+                buy_score += 2  # Medium weight for support
         
-        # Condition 2: RSI oversold with momentum check
-        if rsi:
-            if rsi <= self.rsi_oversold:
-                buy_conditions.append(f"RSI oversold ({rsi:.1f})")
-                condition_scores.append(2)
-            elif rsi <= self.rsi_oversold + 5:  # Slightly oversold
-                buy_conditions.append(f"RSI approaching oversold ({rsi:.1f})")
-                condition_scores.append(1)
+        # Primary Condition 3: Price below lower Bollinger Band (oversold)
+        if bb_lower and current_price is not None and current_price <= bb_lower:
+            buy_conditions.append(f"Below lower Bollinger Band (${bb_lower:.2f})")
+            buy_score += 2  # Medium weight for BB
         
-        # Condition 3: MACD momentum confirmation (NEW)
-        if macd and macd_signal and macd_histogram:
-            # MACD bullish crossover or positive momentum
-            if macd > macd_signal and macd_histogram > 0:
-                buy_conditions.append(f"MACD bullish momentum (MACD: {macd:.4f})")
-                condition_scores.append(2)
-            elif macd > macd_signal:  # MACD above signal line
-                buy_conditions.append(f"MACD above signal line")
-                condition_scores.append(1)
+        # Secondary Condition: Trend confirmation (price above SMA)
+        if sma_20 and current_price is not None and current_price > sma_20:
+            buy_conditions.append(f"Above SMA20 trend (${sma_20:.2f})")
+            buy_score += 1  # Low weight for trend
         
-        # Condition 4: Volume confirmation (NEW)
-        if current_volume and volume_sma and volume_sma > 0:
-            volume_ratio = current_volume / volume_sma
-            if volume_ratio >= 1.5:  # Volume 50% above average
-                buy_conditions.append(f"High volume confirmation ({volume_ratio:.1f}x avg)")
-                condition_scores.append(2)
-            elif volume_ratio >= 1.2:  # Volume 20% above average
-                buy_conditions.append(f"Above average volume ({volume_ratio:.1f}x avg)")
-                condition_scores.append(1)
-        
-        # Condition 5: Price near lower Bollinger Band
-        if bb_lower and current_price is not None and current_price <= bb_lower * 1.02:  # Within 2% of lower band
-            buy_conditions.append(f"Near lower Bollinger Band (${bb_lower:.2f})")
-            condition_scores.append(2)
-        
-        # Condition 6: Trend confirmation (price above SMA in uptrend)
-        if sma_20 and current_price is not None and current_price > sma_20 * 0.98:  # Within 2% of SMA
-            buy_conditions.append(f"Price near/above SMA20 (${sma_20:.2f})")
-            condition_scores.append(1)
-        
-        # Condition 7: Bollinger Band squeeze (low volatility)
-        if bb_upper and bb_lower and bb_middle:
-            bb_width = (bb_upper - bb_lower) / bb_middle
-            if bb_width < 0.1:  # Tight bands indicate low volatility
-                buy_conditions.append("Low volatility (BB squeeze)")
-                condition_scores.append(1)
-        
-        # Condition 8: Risk/Reward ratio check
+        # Risk/Reward validation (must have good ratio)
+        good_risk_reward = False
         if (nearest_resistance and nearest_resistance.price is not None and nearest_resistance.price > 0 and
-            nearest_support and nearest_support.price is not None and nearest_support.price > 0 and
             current_price is not None and current_price > 0):
             potential_profit = nearest_resistance.price - current_price
-            potential_loss = current_price - nearest_support.price
-            if potential_loss > 0 and potential_profit / potential_loss >= 2.0:  # 2:1 ratio
+            potential_loss = current_price * self.stop_loss_pct  # Use stop loss percentage
+            if potential_loss > 0 and potential_profit / potential_loss >= 1.5:  # 1.5:1 minimum ratio
                 buy_conditions.append(f"Good R/R ratio ({potential_profit/potential_loss:.1f}:1)")
-                condition_scores.append(2)
+                good_risk_reward = True
+                buy_score += 1
         
-        # Calculate total score
-        total_score = sum(condition_scores)
-        min_score = self.min_buy_score  # Use trading mode specific threshold
+        # Simplified decision logic: need at least 2 primary conditions OR 1 primary + good R/R
+        min_score_needed = 4  # Reduced from complex scoring
+        has_primary_signal = buy_score >= 2  # At least one strong signal
         
-        # Check for required signal types (support/technical + momentum + volume)
-        has_support_signal = any('support' in condition.lower() or 'rsi' in condition.lower() or 'bollinger' in condition.lower() for condition in buy_conditions)
-        has_momentum_signal = any('macd' in condition.lower() for condition in buy_conditions)
-        has_volume_signal = any('volume' in condition.lower() for condition in buy_conditions)
+        # Final decision: simplified logic
+        should_buy = (buy_score >= min_score_needed) or (has_primary_signal and good_risk_reward)
         
         # Log conditions found
-        self.logger.info(f"{symbol}: Buy conditions met: {len(buy_conditions)} (score: {total_score}/{min_score}) - {buy_conditions}")
-        self.logger.debug(f"{symbol}: Signal types - Support/Technical: {has_support_signal}, Momentum: {has_momentum_signal}, Volume: {has_volume_signal}")
+        self.logger.info(f"{symbol}: Buy conditions met: {len(buy_conditions)} (score: {buy_score}/{min_score_needed}) - {buy_conditions}")
+        self.logger.debug(f"{symbol}: Primary signal strength: {has_primary_signal}, Good R/R: {good_risk_reward}")
         
-        # Generate buy signal if enhanced conditions are met
-        # Require at least 3 conditions with minimum score, including momentum and volume confirmation
-        if (len(buy_conditions) >= 3 and total_score >= min_score and 
-            has_support_signal and (has_momentum_signal or has_volume_signal)):
+        # Generate buy signal if simplified conditions are met
+        if should_buy:
             reason = "; ".join(buy_conditions)
             signals.append(("BUY", reason))
             trade_logger.log_trade_signal(symbol, "BUY", current_price, reason)
@@ -748,6 +758,12 @@ class ScalpingStrategy:
             Trade object if successful, None otherwise.
         """
         def _place_buy_order():
+            # Check daily limits first
+            can_trade, limit_reason = self._check_daily_limits()
+            if not can_trade:
+                self.logger.warning(f"{symbol}: Cannot execute buy order - {limit_reason}")
+                return None
+            
             # Get account information first
             account = self.alpaca_client.get_account()
             if not account:
@@ -824,13 +840,18 @@ class ScalpingStrategy:
                 # Get current trading mode parameters with dynamic adjustment
                 mode_params = TradingMode.get_mode_params(self.trading_mode, portfolio_value)
                 
-                # Calculate position value based on mode and portfolio value (not buying power)
+                # Calculate position value using improved risk management
+                # Use the new max_position_percentage setting (default 2% of portfolio)
+                base_position_value = portfolio_value * self.max_position_pct
+                
+                # Apply trading mode multiplier but cap it
                 max_position_value = min(
-                    portfolio_value * 0.05 * mode_params['position_size_multiplier'],  # Use 5% of portfolio value
+                    base_position_value * mode_params['position_size_multiplier'],
                     mode_params['max_position_value'],
-                    portfolio_value * 0.1  # Never use more than 10% of portfolio value per trade
+                    portfolio_value * 0.05  # Never use more than 5% of portfolio value per trade (reduced from 10%)
                 )
-                self.logger.info(f"{symbol}: Using dynamic position sizing: ${max_position_value:.2f} (Portfolio: ${portfolio_value:.2f})")
+                self.logger.info(f"{symbol}: Using improved position sizing: ${max_position_value:.2f} "
+                               f"(Portfolio: ${portfolio_value:.2f}, Base %: {self.max_position_pct*100:.1f}%)")
             
             # Validate minimum order amount
             if max_position_value < 1.0:  # Minimum $1 order
@@ -1212,6 +1233,9 @@ class ScalpingStrategy:
                 self.active_positions[symbol] = trade
                 self.partial_profit_progress[symbol] = 0 # Initialize progress (0 = no tiers executed yet)
                 
+                # Increment daily trade counter for buy orders
+                self._increment_daily_trades()
+                
                 trade_logger.log_position_opened(symbol, quantity, fill_price)
                 
             elif order.side == 'sell':
@@ -1224,6 +1248,9 @@ class ScalpingStrategy:
                         pnl = (fill_price - position.price) * quantity
                     else:
                         pnl = 0.0
+
+                    # Update daily P&L tracking
+                    self._update_daily_pnl(pnl)
 
                     # Log the partial or full closure
                     trade_logger.log_position_closed(
@@ -1364,6 +1391,12 @@ class ScalpingStrategy:
     def _is_favorable_market_condition(self, stock_data: StockData) -> bool:
         """Check if market conditions are favorable for trading.
         
+        Enhanced market filter that considers:
+        - Overall market sentiment (SPY trend)
+        - Individual stock volatility
+        - Bid-ask spreads
+        - Technical extremes
+        
         Args:
             stock_data: Stock data with technical indicators.
             
@@ -1378,8 +1411,19 @@ class ScalpingStrategy:
             return False  # Not favorable if no valid quote
         
         current_price = stock_data.current_quote.bid
+        symbol = stock_data.symbol
         
-        # Check for extreme volatility (avoid trading in highly volatile conditions)
+        # 1. Market Sentiment Check (SPY trend analysis)
+        market_sentiment = self._get_market_sentiment()
+        if market_sentiment == "BEARISH":
+            self.logger.debug(f"{symbol}: Bearish market sentiment detected, avoiding new positions")
+            return False
+        elif market_sentiment == "NEUTRAL" and symbol not in ["SPY", "QQQ", "IWM"]:
+            # In neutral markets, only trade major ETFs
+            self.logger.debug(f"{symbol}: Neutral market, limiting to major ETFs only")
+            return False
+        
+        # 2. Volatility Check (refined thresholds)
         if (stock_data.technical_indicators.bollinger_upper and 
             stock_data.technical_indicators.bollinger_lower and
             stock_data.technical_indicators.bollinger_middle):
@@ -1389,37 +1433,133 @@ class ScalpingStrategy:
             bb_middle = stock_data.technical_indicators.bollinger_middle
             bb_width = (bb_upper - bb_lower) / bb_middle
             
-            # Avoid trading when volatility is too high
-            if bb_width > 0.25:  # 25% width indicates high volatility
-                self.logger.debug(f"{stock_data.symbol}: High volatility detected (BB width: {bb_width:.3f})")
+            # Refined volatility thresholds
+            if bb_width > 0.20:  # Reduced from 0.25 for tighter control
+                self.logger.debug(f"{symbol}: High volatility detected (BB width: {bb_width:.3f})")
+                return False
+            elif bb_width < 0.05:  # Too low volatility (no movement)
+                self.logger.debug(f"{symbol}: Very low volatility detected (BB width: {bb_width:.3f})")
                 return False
         
-        # Check for extreme RSI conditions (avoid whipsaws)
+        # 3. RSI Extremes Check (refined)
         rsi = stock_data.technical_indicators.rsi
         if rsi:
-            # Avoid trading when RSI is in extreme territory (potential reversal)
-            if rsi > 80 or rsi < 15:
-                self.logger.debug(f"{stock_data.symbol}: Extreme RSI detected ({rsi:.1f})")
+            # Tighter RSI bounds to avoid false signals
+            if rsi > 75 or rsi < 20:
+                self.logger.debug(f"{symbol}: Extreme RSI detected ({rsi:.1f})")
                 return False
         
-        # Check bid-ask spread (avoid trading with wide spreads)
+        # 4. Bid-Ask Spread Check (tighter for scalping)
         if (stock_data.current_quote and 
             stock_data.current_quote.bid is not None and 
             stock_data.current_quote.ask is not None):
             bid = stock_data.current_quote.bid
             ask = stock_data.current_quote.ask
             spread_pct = (ask - bid) / bid
-            if spread_pct > 0.01:  # 1% spread threshold
-                self.logger.debug(f"{stock_data.symbol}: Wide spread detected ({spread_pct:.3f})")
+            # Tighter spread requirement for scalping
+            if spread_pct > 0.005:  # 0.5% spread threshold (reduced from 1%)
+                self.logger.debug(f"{symbol}: Wide spread detected ({spread_pct:.3f})")
                 return False
         
-        # Check for gap conditions (avoid trading right after large gaps)
-        if (stock_data.technical_indicators.sma_20 and 
-            abs(current_price - stock_data.technical_indicators.sma_20) / stock_data.technical_indicators.sma_20 > 0.05):
-            self.logger.debug(f"{stock_data.symbol}: Large gap from SMA20 detected")
+        # 5. Price Gap Check (avoid post-gap trading)
+        if stock_data.technical_indicators.sma_20:
+            gap_pct = abs(current_price - stock_data.technical_indicators.sma_20) / stock_data.technical_indicators.sma_20
+            if gap_pct > 0.03:  # Reduced from 5% to 3%
+                self.logger.debug(f"{symbol}: Large gap from SMA20 detected ({gap_pct:.3f})")
+                return False
+        
+        # 6. Trading Hours Check (avoid first/last 30 minutes)
+        if not self._is_optimal_trading_time():
+            self.logger.debug(f"{symbol}: Outside optimal trading hours")
             return False
         
         return True
+    
+    def _get_market_sentiment(self) -> str:
+        """Analyze overall market sentiment using SPY.
+        
+        Returns:
+            "BULLISH", "BEARISH", or "NEUTRAL"
+        """
+        try:
+            # Try to get SPY data for market sentiment
+            spy_data = self.data_manager.get_stock_data("SPY")
+            if not spy_data or not spy_data.technical_indicators:
+                return "NEUTRAL"  # Default if no SPY data
+            
+            spy_rsi = spy_data.technical_indicators.rsi
+            spy_sma20 = spy_data.technical_indicators.sma_20
+            spy_price = spy_data.current_quote.bid if spy_data.current_quote else None
+            
+            if not all([spy_rsi, spy_sma20, spy_price]):
+                return "NEUTRAL"
+            
+            # Determine sentiment based on SPY indicators
+            bullish_signals = 0
+            bearish_signals = 0
+            
+            # RSI analysis
+            if spy_rsi > 50:
+                bullish_signals += 1
+            elif spy_rsi < 50:
+                bearish_signals += 1
+            
+            # Price vs SMA analysis
+            if spy_price > spy_sma20:
+                bullish_signals += 1
+            elif spy_price < spy_sma20:
+                bearish_signals += 1
+            
+            # Bollinger Band position
+            if (spy_data.technical_indicators.bollinger_upper and 
+                spy_data.technical_indicators.bollinger_lower):
+                bb_upper = spy_data.technical_indicators.bollinger_upper
+                bb_lower = spy_data.technical_indicators.bollinger_lower
+                bb_position = (spy_price - bb_lower) / (bb_upper - bb_lower)
+                
+                if bb_position > 0.6:
+                    bullish_signals += 1
+                elif bb_position < 0.4:
+                    bearish_signals += 1
+            
+            # Determine overall sentiment
+            if bullish_signals >= 2:
+                return "BULLISH"
+            elif bearish_signals >= 2:
+                return "BEARISH"
+            else:
+                return "NEUTRAL"
+                
+        except Exception as e:
+            self.logger.debug(f"Error analyzing market sentiment: {e}")
+            return "NEUTRAL"
+    
+    def _is_optimal_trading_time(self) -> bool:
+        """Check if current time is optimal for trading.
+        
+        Avoids first and last 30 minutes of trading day.
+        
+        Returns:
+            True if optimal time, False otherwise.
+        """
+        try:
+            from datetime import datetime, time
+            import pytz
+            
+            # Get current Eastern Time
+            et = pytz.timezone('US/Eastern')
+            now = datetime.now(et).time()
+            
+            # Market hours: 9:30 AM - 4:00 PM ET
+            # Optimal hours: 10:00 AM - 3:30 PM ET (avoid first/last 30 min)
+            optimal_start = time(10, 0)  # 10:00 AM
+            optimal_end = time(15, 30)   # 3:30 PM
+            
+            return optimal_start <= now <= optimal_end
+            
+        except Exception as e:
+            self.logger.debug(f"Error checking trading time: {e}")
+            return True  # Default to allow trading if time check fails
     
     def _calculate_dynamic_position_size(self, symbol: str, current_price: float, portfolio_value: float) -> float:
         """Calculate dynamic position size based on volatility and market conditions.

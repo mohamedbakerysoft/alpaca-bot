@@ -62,25 +62,47 @@ class Settings:
             cast=int
         )
         
-        # Strategy Parameters
+        # Strategy Parameters - Improved for better risk management
         self.default_position_size: float = config(
             "DEFAULT_POSITION_SIZE",
-            default=1000.0,
+            default=500.0,  # Reduced from 1000 to limit risk per trade
             cast=float
         )
         self.support_threshold: float = config(
             "SUPPORT_THRESHOLD",
-            default=0.02,
+            default=0.015,  # Tightened from 0.02 for better entry precision
             cast=float
         )
         self.resistance_threshold: float = config(
             "RESISTANCE_THRESHOLD",
-            default=0.015,
+            default=0.01,  # Tightened from 0.015 for better exit precision
             cast=float
         )
         self.stop_loss_percentage: float = config(
             "STOP_LOSS_PERCENTAGE",
-            default=0.01,
+            default=0.025,  # Increased from 0.01 (1%) to 0.025 (2.5%) for better protection
+            cast=float
+        )
+        
+        # Additional risk management parameters
+        self.take_profit_percentage: float = config(
+            "TAKE_PROFIT_PERCENTAGE",
+            default=0.05,  # 5% take profit for better risk/reward ratio (2:1)
+            cast=float
+        )
+        self.max_daily_loss_percentage: float = config(
+            "MAX_DAILY_LOSS_PERCENTAGE",
+            default=0.05,  # 5% maximum daily loss
+            cast=float
+        )
+        self.max_daily_trades: int = config(
+            "MAX_DAILY_TRADES",
+            default=10,  # Limit daily trades to prevent overtrading
+            cast=int
+        )
+        self.max_position_percentage: float = config(
+            "MAX_POSITION_PERCENTAGE",
+            default=0.02,  # Maximum 2% of portfolio per position (reduced from 5%)
             cast=float
         )
         
