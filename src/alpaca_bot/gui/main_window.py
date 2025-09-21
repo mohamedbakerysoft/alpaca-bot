@@ -494,7 +494,9 @@ class MainWindow:
                 return
             
             # Check market hours
-            is_open, market_status = market_hours.get_market_status()
+            is_open = market_hours.is_market_open(settings.weekend_trading_enabled)
+            market_status = market_hours.get_market_status(settings.weekend_trading_enabled)
+            
             if not is_open:
                 time_until_open = market_hours.get_time_until_open()
                 message = f"Market is currently closed.\n\n{market_status}"
@@ -920,7 +922,8 @@ class MainWindow:
     def _update_market_status(self) -> None:
         """Update the market status display."""
         try:
-            is_open, status_message = market_hours.get_market_status()
+            is_open = market_hours.is_market_open(settings.weekend_trading_enabled)
+            status_message = market_hours.get_market_status(settings.weekend_trading_enabled)
             status_text = f"Market: {status_message}"
             
             if not is_open:

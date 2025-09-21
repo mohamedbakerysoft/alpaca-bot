@@ -135,6 +135,13 @@ class Settings:
             cast=str
         )
         
+        # Weekend Trading
+        self.weekend_trading_enabled: bool = config(
+            "WEEKEND_TRADING_ENABLED",
+            default=False,
+            cast=bool
+        )
+        
         # Portfolio Management
         self.custom_portfolio_value_enabled: bool = config(
             "CUSTOM_PORTFOLIO_VALUE_ENABLED",
@@ -299,6 +306,7 @@ class Settings:
                 
                 # Trading Configuration
                 'TRADING_MODE': self.trading_mode,
+                'WEEKEND_TRADING_ENABLED': str(self.weekend_trading_enabled).lower(),
                 'SUPPORT_THRESHOLD': str(self.support_threshold),
                 'RESISTANCE_THRESHOLD': str(self.resistance_threshold),
                 'STOP_LOSS_PERCENTAGE': str(self.stop_loss_percentage),
@@ -337,7 +345,7 @@ class Settings:
                         f.write(f"{key}={existing_vars[key]}\n")
                 
                 f.write("\n# Trading Configuration\n")
-                for key in ['TRADING_MODE', 'SUPPORT_THRESHOLD', 'RESISTANCE_THRESHOLD', 'STOP_LOSS_PERCENTAGE', 'DEFAULT_POSITION_SIZE']:
+                for key in ['TRADING_MODE', 'WEEKEND_TRADING_ENABLED', 'SUPPORT_THRESHOLD', 'RESISTANCE_THRESHOLD', 'STOP_LOSS_PERCENTAGE', 'DEFAULT_POSITION_SIZE']:
                     if key in existing_vars:
                         f.write(f"{key}={existing_vars[key]}\n")
                 

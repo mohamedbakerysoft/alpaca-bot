@@ -21,8 +21,11 @@ class MarketHours:
         self.logger = logging.getLogger(__name__)
         self.eastern_tz = pytz.timezone('US/Eastern')
         
-    def is_market_open(self) -> bool:
+    def is_market_open(self, weekend_trading_enabled: bool = False) -> bool:
         """Check if the market is currently open.
+        
+        Args:
+            weekend_trading_enabled (bool): Whether weekend trading is enabled.
         
         Returns:
             bool: True if market is open, False otherwise.
@@ -30,7 +33,7 @@ class MarketHours:
         now_et = datetime.now(self.eastern_tz)
         
         # Check if it's a weekday (Monday=0, Sunday=6)
-        if now_et.weekday() >= 5:  # Saturday or Sunday
+        if now_et.weekday() >= 5 and not weekend_trading_enabled:  # Saturday or Sunday
             return False
             
         # Get current time
@@ -46,44 +49,44 @@ class MarketHours:
         market_open = time(start_hour, start_minute)
         market_close = time(end_hour, end_minute)
         
+        # For weekend trading, allow 24/7 trading on weekends
+        if weekend_trading_enabled and now_et.weekday() >= 5:
+            return True
+        
         # Check if current time is within trading hours
         return market_open <= current_time <= market_close
     
-    def get_market_status(self) -> Tuple[bool, str]:
-        """Get detailed market status.
+    def get_market_status(self, weekend_trading_enabled: bool = False) -> str:
+        """Get current market status message.
+        
+        Args:
+            weekend_trading_enabled (bool): Whether weekend trading is enabled.
         
         Returns:
-            Tuple[bool, str]: (is_open, status_message)
+            str: Market status message.
         """
         now_et = datetime.now(self.eastern_tz)
+        current_weekday = now_et.weekday()
         
-        # Check if it's a weekday
-        if now_et.weekday() >= 5:  # Weekend
-            next_monday = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
-            days_until_monday = (7 - now_et.weekday()) % 7
-            if days_until_monday == 0:  # It's Sunday
-                days_until_monday = 1
-            next_monday = next_monday.replace(day=now_et.day + days_until_monday)
-            return False, f"Market closed (Weekend). Opens Monday at 9:30 AM ET"
+        # Check if it's weekend
+        if current_weekday >= 5:
+            if weekend_trading_enabled:
+                return "Weekend trading is enabled - Market is open"
+            else:
+                return "Market is closed (Weekend). Opens Monday at 9:30 AM ET."
         
-        # Get trading hours from settings
-        start_hour = getattr(settings, 'trading_start_hour', 9)
-        start_minute = getattr(settings, 'trading_start_minute', 30)
-        end_hour = getattr(settings, 'trading_end_hour', 16)
-        end_minute = getattr(settings, 'trading_end_minute', 0)
+        # Check if market is open
+        if self.is_market_open(weekend_trading_enabled):
+            return "Market is open"
         
-        current_time = now_et.time()
-        market_open = time(start_hour, start_minute)
-        market_close = time(end_hour, end_minute)
+        # Market is closed during weekday
+        market_open = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+        market_close = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
         
-        if current_time < market_open:
-            return False, f"Market closed. Opens at {start_hour:02d}:{start_minute:02d} ET"
-        elif current_time > market_close:
-            tomorrow = now_et.replace(hour=start_hour, minute=start_minute, second=0, microsecond=0)
-            tomorrow = tomorrow.replace(day=now_et.day + 1)
-            return False, f"Market closed. Opens tomorrow at {start_hour:02d}:{start_minute:02d} ET"
+        if now_et < market_open:
+            return f"Market opens at 9:30 AM ET (in {self.get_time_until_open()})"
         else:
-            return True, f"Market open until {end_hour:02d}:{end_minute:02d} ET"
+            return "Market is closed. Opens tomorrow at 9:30 AM ET."
     
     def get_time_until_open(self) -> Optional[str]:
         """Get time until market opens.
@@ -91,7 +94,7 @@ class MarketHours:
         Returns:
             Optional[str]: Time until market opens, or None if market is open.
         """
-        is_open, _ = self.get_market_status()
+        is_open = self.is_market_open()
         if is_open:
             return None
             
@@ -126,14 +129,13 @@ class MarketHours:
         else:
             return f"{int(hours)}h {int(minutes)}m"
     
-    def get_current_et_time(self) -> str:
-        """Get current Eastern Time as formatted string.
+    def get_current_et_time(self) -> datetime:
+        """Get current Eastern Time as datetime object.
         
         Returns:
-            str: Current time in ET timezone.
+            datetime: Current time in ET timezone.
         """
-        now_et = datetime.now(self.eastern_tz)
-        return now_et.strftime("%Y-%m-%d %H:%M:%S %Z")
+        return datetime.now(self.eastern_tz)
 
 
 # Global market hours instance
