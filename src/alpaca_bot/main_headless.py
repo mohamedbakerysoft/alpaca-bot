@@ -23,10 +23,9 @@ sys.path.insert(0, str(project_root / "src"))
 
 try:
     from alpaca_bot.config.settings import Settings
-    from alpaca_bot.services.alpaca_service import AlpacaService
-    from alpaca_bot.services.trading_service import TradingService
-    from alpaca_bot.utils.logger import setup_logging
-    from alpaca_bot.models.trading_mode import TradingMode
+    from alpaca_bot.services.alpaca_client import AlpacaClient
+    from alpaca_bot.utils.logging_utils import setup_logging
+    from alpaca_bot.strategies.scalping_strategy import ScalpingStrategy, TradingMode
 except ImportError as e:
     print(f"Import error: {e}")
     print("Current working directory:", os.getcwd())

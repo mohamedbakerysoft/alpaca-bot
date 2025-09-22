@@ -78,6 +78,18 @@ class AlpacaClient:
             self.logger.error(f"API connection test failed: {e}")
             raise AlpacaClientError(f"API connection test failed: {e}")
     
+    def is_connected(self) -> bool:
+        """Check if the API connection is working.
+        
+        Returns:
+            bool: True if connected and account is active, False otherwise.
+        """
+        try:
+            self._test_connection()
+            return True
+        except Exception:
+            return False
+    
     @retry_on_error(max_retries=3, delay=1.0)
     @circuit_breaker(failure_threshold=5, timeout=300)
     def get_account(self) -> Account:
