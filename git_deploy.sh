@@ -134,19 +134,37 @@ deploy_to_pi() {
         # Stop the service
         sudo systemctl stop alpaca-bot.service || true
         
-        # Fetch latest changes
-        git fetch origin
+        # Store current commit hash before pulling
+        CURRENT_COMMIT=\$(git rev-parse HEAD)
         
-        # Checkout and pull the specified branch
-        git checkout "$branch"
+        # Pull latest changes from the current branch
         git pull origin "$branch"
         
-        # Activate virtual environment and update dependencies
+        # Get new commit hash after pulling
+        NEW_COMMIT=\$(git rev-parse HEAD)
+        
+        # Check if there are any changes
+        if [ "\$CURRENT_COMMIT" = "\$NEW_COMMIT" ]; then
+            echo "No new commits found, skipping package installation"
+            SKIP_PACKAGES=true
+        else
+            echo "New commits detected, checking for package changes..."
+            # Check if requirements files changed between commits
+            if git diff --name-only "\$CURRENT_COMMIT" "\$NEW_COMMIT" | grep -q "requirements/"; then
+                echo "Requirements files changed, will update packages"
+                SKIP_PACKAGES=false
+            else
+                echo "No requirements changes detected, skipping package installation"
+                SKIP_PACKAGES=true
+            fi
+        fi
+        
+        # Activate virtual environment
         source alpaca-venv/bin/activate
         
-        # Update requirements if they changed
-        if git diff HEAD~1 --name-only | grep -q requirements; then
-            echo "Requirements changed, updating..."
+        # Update dependencies only if requirements changed
+        if [ "\$SKIP_PACKAGES" = "false" ]; then
+            echo "Installing/updating packages..."
             pip install -r requirements/pi.txt
         fi
         
