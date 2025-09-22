@@ -1,19 +1,19 @@
-"""Simple trading strategy implementation for automated trading.
+"""Enhanced trading strategy implementation for automated trading.
 
-This module implements a simplified strategy that:
-1. Uses basic technical indicators (RSI, SMA)
-2. Takes positions based on simple conditions
-3. Focuses on actually executing trades rather than complex filtering
-4. Has three modes: SAFE, SMART, AGGRESSIVE
+This module implements an optimized strategy that:
+1. Uses multiple technical indicators with confirmations
+2. Analyzes market trend before taking positions
+3. Implements smart risk management
+4. Focuses on high-probability trades
 """
 
 import logging
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
-from enum import Enum
 
 import pandas as pd
+import numpy as np
 from alpaca_trade_api.rest import REST
 
 from ..config.settings import settings
@@ -28,57 +28,11 @@ from ..utils.error_handler import (
 )
 
 
-class SimpleTradingMode(Enum):
-    """Simplified trading mode enumeration."""
-    SAFE = "safe"
-    SMART = "smart"
-    AGGRESSIVE = "aggressive"
-    
-    @classmethod
-    def get_mode_params(cls, mode: 'SimpleTradingMode') -> Dict[str, float]:
-        """Get trading parameters for each mode.
-        
-        Args:
-            mode: Trading mode.
-            
-        Returns:
-            Dictionary with mode-specific parameters.
-        """
-        params = {
-            cls.SAFE: {
-                'position_size_pct': 0.02,  # 2% of portfolio per trade
-                'stop_loss_pct': 0.02,      # 2% stop loss
-                'take_profit_pct': 0.04,    # 4% take profit
-                'max_daily_trades': 5,
-                'rsi_oversold': 30,
-                'rsi_overbought': 70,
-            },
-            cls.SMART: {
-                'position_size_pct': 0.03,  # 3% of portfolio per trade
-                'stop_loss_pct': 0.015,     # 1.5% stop loss
-                'take_profit_pct': 0.03,    # 3% take profit
-                'max_daily_trades': 8,
-                'rsi_oversold': 35,
-                'rsi_overbought': 65,
-            },
-            cls.AGGRESSIVE: {
-                'position_size_pct': 0.05,  # 5% of portfolio per trade
-                'stop_loss_pct': 0.01,      # 1% stop loss
-                'take_profit_pct': 0.02,    # 2% take profit
-                'max_daily_trades': 15,
-                'rsi_oversold': 40,
-                'rsi_overbought': 60,
-            }
-        }
-        
-        return params[mode]
-
-
-class SimpleStrategy:
-    """Simple trading strategy implementation."""
+class EnhancedStrategy:
+    """Enhanced trading strategy with improved signal generation and risk management."""
     
     def __init__(self, alpaca_client: AlpacaClient, settings=None):
-        """Initialize the simple strategy.
+        """Initialize the enhanced strategy.
         
         Args:
             alpaca_client: Alpaca API client.
@@ -88,114 +42,147 @@ class SimpleStrategy:
         self.settings = settings or globals()['settings']
         self.logger = logging.getLogger(__name__)
         
-        # Set trading mode
-        trading_mode_str = getattr(self.settings, 'trading_mode', 'smart')
-        try:
-            if trading_mode_str == 'conservative':
-                self.trading_mode = SimpleTradingMode.SMART
-            elif trading_mode_str == 'ultra_safe':
-                self.trading_mode = SimpleTradingMode.SAFE
-            elif trading_mode_str == 'aggressive':
-                self.trading_mode = SimpleTradingMode.AGGRESSIVE
-            else:
-                self.trading_mode = SimpleTradingMode(trading_mode_str)
-        except ValueError:
-            self.logger.warning(f"Invalid trading mode '{trading_mode_str}', defaulting to smart")
-            self.trading_mode = SimpleTradingMode.SMART
+        # Enhanced strategy parameters
+        self.position_size_pct = 0.03  # 3% of portfolio per trade
+        self.stop_loss_pct = 0.015     # 1.5% stop loss
+        self.take_profit_pct = 0.03    # 3% take profit
+        self.max_daily_trades = 8      # Maximum trades per day
+        self.min_volume_threshold = 50000  # Reduced from 100000 to 50000 - Minimum daily volume
         
-        # Get mode parameters
-        self.mode_params = SimpleTradingMode.get_mode_params(self.trading_mode)
+        # Technical indicator thresholds
+        self.rsi_oversold = 30
+        self.rsi_overbought = 70
+        self.rsi_neutral_low = 40
+        self.rsi_neutral_high = 60
         
-        # Strategy parameters
-        self.position_size_pct = self.mode_params['position_size_pct']
-        self.stop_loss_pct = self.mode_params['stop_loss_pct']
-        self.take_profit_pct = self.mode_params['take_profit_pct']
-        self.max_daily_trades = self.mode_params['max_daily_trades']
-        self.rsi_oversold = self.mode_params['rsi_oversold']
-        self.rsi_overbought = self.mode_params['rsi_overbought']
+        # Trend analysis parameters
+        self.trend_strength_threshold = 0.02  # 2% for strong trend
+        self.volume_spike_threshold = 1.5     # 1.5x average volume
         
-        # Daily tracking
+        # State tracking
+        self.active_positions: Dict[str, Trade] = {}
+        self.pending_orders: Dict[str, str] = {}
         self.daily_trades_count = 0
         self.last_reset_date = datetime.now().date()
         
-        # Active positions and orders
-        self.active_positions: Dict[str, Trade] = {}
-        self.pending_orders: Dict[str, str] = {}
-        
-        # Callbacks for GUI updates
+        # Callbacks
         self.account_update_callback = None
         self.order_update_callback = None
+        self.position_update_callback = None
         
-        self.logger.info(f"Simple strategy initialized in {self.trading_mode.value.upper()} mode")
-        self.logger.info(f"Parameters: Position size: {self.position_size_pct*100:.1f}%, "
-                        f"Stop loss: {self.stop_loss_pct*100:.1f}%, "
-                        f"Take profit: {self.take_profit_pct*100:.1f}%, "
-                        f"Max daily trades: {self.max_daily_trades}")
-    
-    def set_callbacks(self, account_callback=None, order_callback=None):
-        """Set callback functions for GUI updates."""
+        self.logger.info(f"Enhanced strategy initialized with optimized parameters")
+
+    def set_callbacks(self, account_callback=None, order_callback=None, position_callback=None):
+        """Set callback functions for updates."""
         self.account_update_callback = account_callback
         self.order_update_callback = order_callback
-    
-    def _reset_daily_counters_if_needed(self) -> None:
-        """Reset daily counters if it's a new day."""
+        self.position_update_callback = position_callback
+
+    def _reset_daily_counters_if_needed(self):
+        """Reset daily counters if it's a new trading day."""
         current_date = datetime.now().date()
         if current_date != self.last_reset_date:
             self.daily_trades_count = 0
             self.last_reset_date = current_date
             self.logger.info("Daily counters reset for new trading day")
-    
+
     def analyze_symbol(self, symbol: str) -> Optional[StockData]:
-        """Analyze a symbol and return stock data with technical indicators.
+        """Analyze a symbol with enhanced technical indicators.
         
         Args:
             symbol: Stock symbol to analyze.
             
         Returns:
-            StockData object with technical indicators, or None if error.
+            StockData object with enhanced analysis or None if error.
         """
         try:
-            # Get current quote
-            quote = self.alpaca_client.get_latest_quote(symbol)
-            if not quote:
-                self.logger.warning(f"No quote data for {symbol}")
+            # Get market data for the last 30 days to ensure we have enough data
+            from datetime import datetime, timedelta
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=30)
+            
+            bars = self.alpaca_client.get_bars(
+                symbol, 
+                timeframe='1Day', 
+                start=start_date,
+                end=end_date,
+                limit=100
+            )
+            self.logger.info(f"{symbol}: Retrieved {len(bars) if bars is not None and not bars.empty else 0} bars")
+            if bars is None or bars.empty or len(bars) < 20:  # Reduced from 50 to 20 days
+                self.logger.warning(f"{symbol}: Insufficient data for analysis (got {len(bars) if bars is not None and not bars.empty else 0} bars, need 20)")
                 return None
             
-            # Get recent bars for technical analysis
-            df = self.alpaca_client.get_bars(symbol, timeframe='1Min', limit=50)
-            if df is None or len(df) < 20:
-                self.logger.warning(f"Insufficient bar data for {symbol}")
+            # Convert to DataFrame for analysis (bars is already a DataFrame)
+            df = bars.copy()
+            
+            # Ensure required columns exist
+            required_columns = ['open', 'high', 'low', 'close', 'volume']
+            if not all(col in df.columns for col in required_columns):
+                self.logger.error(f"{symbol}: Missing required columns in market data")
                 return None
             
-            # Calculate technical indicators
-            df['rsi'] = calculate_rsi(df['close'])
-            df['sma_20'] = calculate_sma(df['close'], 20)
-            df['sma_50'] = calculate_sma(df['close'], 50)
+            # Check minimum volume requirement
+            avg_volume = df['volume'].tail(20).mean()
+            if avg_volume < self.min_volume_threshold:
+                self.logger.warning(f"{symbol}: Volume too low ({avg_volume:.0f} < {self.min_volume_threshold})")
+                return None
+            
+            # Calculate enhanced technical indicators
+            df['rsi'] = self._calculate_rsi(df['close'], 14)
+            df['sma_20'] = df['close'].rolling(window=20).mean()
+            df['sma_50'] = df['close'].rolling(window=50).mean()
+            df['ema_12'] = df['close'].ewm(span=12).mean()
+            df['ema_26'] = df['close'].ewm(span=26).mean()
+            df['macd'] = df['ema_12'] - df['ema_26']
+            df['macd_signal'] = df['macd'].ewm(span=9).mean()
+            df['bb_upper'], df['bb_lower'] = self._calculate_bollinger_bands(df['close'], 20, 2)
+            df['volume_sma'] = df['volume'].rolling(window=20).mean()
             
             # Get latest values
             latest = df.iloc[-1]
-            current_price = float(quote['bid'])
             
             # Create technical indicators object
             technical_indicators = TechnicalIndicators(
                 symbol=symbol,
                 timestamp=datetime.now(),
                 rsi=float(latest['rsi']) if pd.notna(latest['rsi']) else 50.0,
-                sma_20=float(latest['sma_20']) if pd.notna(latest['sma_20']) else current_price,
-                sma_50=float(latest['sma_50']) if pd.notna(latest['sma_50']) else current_price,
-                bollinger_upper=current_price * 1.02,  # Simple approximation
-                bollinger_lower=current_price * 0.98,
-                bollinger_middle=current_price,
-                macd=0.0,
-                macd_signal=0.0,
-                macd_histogram=0.0
+                sma_20=float(latest['sma_20']) if pd.notna(latest['sma_20']) else latest['close'],
+                sma_50=float(latest['sma_50']) if pd.notna(latest['sma_50']) else latest['close'],
+                bollinger_upper=float(latest['bb_upper']) if pd.notna(latest['bb_upper']) else latest['close'] * 1.02,
+                bollinger_lower=float(latest['bb_lower']) if pd.notna(latest['bb_lower']) else latest['close'] * 0.98,
+                bollinger_middle=float(latest['sma_20']) if pd.notna(latest['sma_20']) else latest['close'],
+                macd=float(latest['macd']) if pd.notna(latest['macd']) else 0.0,
+                macd_signal=float(latest['macd_signal']) if pd.notna(latest['macd_signal']) else 0.0,
+                macd_histogram=float(latest['macd'] - latest['macd_signal']) if pd.notna(latest['macd']) and pd.notna(latest['macd_signal']) else 0.0
+            )
+            
+            # Add custom attributes for enhanced analysis
+            technical_indicators.ema_12 = float(latest['ema_12']) if pd.notna(latest['ema_12']) else latest['close']
+            technical_indicators.ema_26 = float(latest['ema_26']) if pd.notna(latest['ema_26']) else latest['close']
+            technical_indicators.volume_ratio = float(latest['volume'] / latest['volume_sma']) if pd.notna(latest['volume_sma']) and latest['volume_sma'] > 0 else 1.0
+            
+            # Get current quote
+            quote_data = self.alpaca_client.get_latest_quote(symbol)
+            if not quote_data:
+                self.logger.warning(f"{symbol}: Could not get current quote")
+                return None
+            
+            # Create StockQuote object from quote data
+            current_quote = StockQuote(
+                symbol=symbol,
+                bid=float(quote_data['bid']),
+                ask=float(quote_data['ask']),
+                bid_size=int(quote_data['bid_size']),
+                ask_size=int(quote_data['ask_size']),
+                timestamp=datetime.now()
             )
             
             # Create stock data object
             stock_data = StockData(
                 symbol=symbol,
-                company_name=symbol,  # Use symbol as company name for now
-                current_quote=quote,
+                company_name=symbol,
+                current_quote=current_quote,
                 technical_indicators=technical_indicators
             )
             
@@ -204,9 +191,9 @@ class SimpleStrategy:
         except Exception as e:
             self.logger.error(f"Error analyzing {symbol}: {e}")
             return None
-    
+
     def generate_signals(self, stock_data: StockData) -> List[Tuple[str, str]]:
-        """Generate trading signals based on simple conditions.
+        """Generate enhanced trading signals with multiple confirmations.
         
         Args:
             stock_data: Stock data with technical indicators.
@@ -220,10 +207,8 @@ class SimpleStrategy:
         if not stock_data.technical_indicators or not stock_data.current_quote:
             return signals
         
-        current_price = float(stock_data.current_quote['bid'])
-        rsi = stock_data.technical_indicators.rsi
-        sma_20 = stock_data.technical_indicators.sma_20
-        sma_50 = stock_data.technical_indicators.sma_50
+        ti = stock_data.technical_indicators
+        current_price = float(stock_data.current_quote.bid)
         
         # Check if we already have a position
         has_position = symbol in self.active_positions
@@ -233,28 +218,53 @@ class SimpleStrategy:
         
         # Check daily trade limit
         if self.daily_trades_count >= self.max_daily_trades:
-            self.logger.debug(f"{symbol}: Daily trade limit reached ({self.daily_trades_count}/{self.max_daily_trades})")
             return signals
         
-        # BUY SIGNALS (only if no position)
-        if not has_position:
+        # Analyze market trend
+        trend_direction = self._analyze_trend(ti)
+        trend_strength = abs((ti.sma_20 - ti.sma_50) / ti.sma_50) if ti.sma_50 > 0 else 0
+        
+        # BUY SIGNALS (only if no position and uptrend)
+        if not has_position and trend_direction == "UP":
+            buy_score = 0
             buy_reasons = []
             
-            # RSI oversold condition
-            if rsi < self.rsi_oversold:
-                buy_reasons.append(f"RSI oversold ({rsi:.1f})")
+            # RSI conditions (stronger signals)
+            if ti.rsi < self.rsi_oversold:
+                buy_score += 3
+                buy_reasons.append(f"RSI oversold ({ti.rsi:.1f})")
+            elif ti.rsi < self.rsi_neutral_low:
+                buy_score += 1
+                buy_reasons.append(f"RSI favorable ({ti.rsi:.1f})")
             
-            # Price below short-term moving average (potential bounce)
-            if current_price < sma_20:
-                buy_reasons.append(f"Price below SMA20 (${current_price:.2f} < ${sma_20:.2f})")
+            # MACD bullish signal
+            if ti.macd > ti.macd_signal:
+                buy_score += 2
+                buy_reasons.append("MACD bullish crossover")
             
-            # Uptrend condition (SMA20 > SMA50)
-            if sma_20 > sma_50:
-                buy_reasons.append(f"Uptrend (SMA20 > SMA50)")
+            # Price near support (Bollinger Band lower)
+            if current_price <= ti.bollinger_lower * 1.02:  # Within 2% of lower band
+                buy_score += 2
+                buy_reasons.append("Price near support level")
             
-            # Simple buy condition: need at least 1 reason (much more lenient)
-            if len(buy_reasons) >= 1:
-                reason = "; ".join(buy_reasons)
+            # Strong uptrend confirmation
+            if trend_strength > self.trend_strength_threshold:
+                buy_score += 2
+                buy_reasons.append(f"Strong uptrend ({trend_strength*100:.1f}%)")
+            
+            # Volume confirmation
+            if hasattr(ti, 'volume_ratio') and ti.volume_ratio > self.volume_spike_threshold:
+                buy_score += 1
+                buy_reasons.append(f"High volume ({ti.volume_ratio:.1f}x)")
+            
+            # Price action confirmation
+            if hasattr(ti, 'ema_12') and hasattr(ti, 'ema_26') and current_price > ti.ema_12 and ti.ema_12 > ti.ema_26:
+                buy_score += 1
+                buy_reasons.append("Bullish price action")
+            
+            # Generate BUY signal if score is high enough
+            if buy_score >= 4:  # Require strong confirmation
+                reason = f"Score: {buy_score}/10 - " + "; ".join(buy_reasons)
                 signals.append(("BUY", reason))
                 self.logger.info(f"{symbol}: BUY signal generated - {reason}")
         
@@ -267,30 +277,80 @@ class SimpleStrategy:
             # Calculate profit/loss percentage
             pnl_pct = (current_price - entry_price) / entry_price
             
-            # Take profit condition
+            # Mandatory exits (risk management)
             if pnl_pct >= self.take_profit_pct:
-                sell_reasons.append(f"Take profit ({pnl_pct*100:.1f}% >= {self.take_profit_pct*100:.1f}%)")
-            
-            # Stop loss condition
+                sell_reasons.append(f"Take profit ({pnl_pct*100:.1f}%)")
             elif pnl_pct <= -self.stop_loss_pct:
-                sell_reasons.append(f"Stop loss ({pnl_pct*100:.1f}% <= -{self.stop_loss_pct*100:.1f}%)")
+                sell_reasons.append(f"Stop loss ({pnl_pct*100:.1f}%)")
             
-            # RSI overbought condition
-            elif rsi > self.rsi_overbought:
-                sell_reasons.append(f"RSI overbought ({rsi:.1f})")
+            # Technical exits
+            elif ti.rsi > self.rsi_overbought:
+                sell_reasons.append(f"RSI overbought ({ti.rsi:.1f})")
+            elif ti.macd < ti.macd_signal and pnl_pct > 0.005:  # MACD bearish with small profit
+                sell_reasons.append("MACD bearish crossover")
+            elif current_price >= ti.bollinger_upper * 0.98 and pnl_pct > 0.01:  # Near resistance with profit
+                sell_reasons.append("Price near resistance")
+            elif trend_direction == "DOWN" and pnl_pct > 0:  # Trend reversal with profit
+                sell_reasons.append("Trend reversal detected")
             
-            # Price above short-term moving average by significant margin
-            elif current_price > sma_20 * 1.02:  # 2% above SMA20
-                sell_reasons.append(f"Price well above SMA20 (${current_price:.2f} > ${sma_20*1.02:.2f})")
-            
-            # Sell if any condition is met
+            # Generate SELL signal
             if sell_reasons:
                 reason = "; ".join(sell_reasons)
                 signals.append(("SELL", reason))
                 self.logger.info(f"{symbol}: SELL signal generated - {reason}")
         
         return signals
-    
+
+    def _analyze_trend(self, ti: TechnicalIndicators) -> str:
+        """Analyze market trend direction.
+        
+        Args:
+            ti: Technical indicators.
+            
+        Returns:
+            Trend direction: "UP", "DOWN", or "SIDEWAYS".
+        """
+        # Multiple timeframe trend analysis
+        sma_trend = "UP" if ti.sma_20 > ti.sma_50 else "DOWN"
+        macd_trend = "UP" if ti.macd > ti.macd_signal else "DOWN"
+        
+        # EMA trend if available
+        ema_trend = "NEUTRAL"
+        if hasattr(ti, 'ema_12') and hasattr(ti, 'ema_26'):
+            ema_trend = "UP" if ti.ema_12 > ti.ema_26 else "DOWN"
+        
+        # Count bullish signals
+        bullish_signals = [sma_trend == "UP", macd_trend == "UP"]
+        if ema_trend != "NEUTRAL":
+            bullish_signals.append(ema_trend == "UP")
+        
+        bullish_count = sum(bullish_signals)
+        total_signals = len(bullish_signals)
+        
+        if bullish_count >= total_signals * 0.7:  # 70% bullish
+            return "UP"
+        elif bullish_count <= total_signals * 0.3:  # 30% or less bullish
+            return "DOWN"
+        else:
+            return "SIDEWAYS"
+
+    def _calculate_rsi(self, prices: pd.Series, period: int = 14) -> pd.Series:
+        """Calculate RSI indicator."""
+        delta = prices.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        return rsi
+
+    def _calculate_bollinger_bands(self, prices: pd.Series, period: int = 20, std_dev: float = 2) -> Tuple[pd.Series, pd.Series]:
+        """Calculate Bollinger Bands."""
+        sma = prices.rolling(window=period).mean()
+        std = prices.rolling(window=period).std()
+        upper_band = sma + (std * std_dev)
+        lower_band = sma - (std * std_dev)
+        return upper_band, lower_band
+
     def execute_trade(self, symbol: str, signal_type: str, reason: str) -> Optional[Trade]:
         """Execute a trade based on the signal.
         
@@ -313,17 +373,9 @@ class SimpleStrategy:
         except Exception as e:
             self.logger.error(f"Error executing {signal_type} trade for {symbol}: {e}")
             return None
-    
+
     def _execute_buy_order(self, symbol: str, reason: str) -> Optional[Trade]:
-        """Execute a buy order.
-        
-        Args:
-            symbol: Stock symbol.
-            reason: Reason for the trade.
-            
-        Returns:
-            Trade object if successful, None otherwise.
-        """
+        """Execute a buy order."""
         try:
             # Get account information
             account = self.alpaca_client.get_account()
@@ -333,8 +385,6 @@ class SimpleStrategy:
             # Calculate position size
             portfolio_value = float(account.portfolio_value)
             position_value = portfolio_value * self.position_size_pct
-            
-            # Ensure minimum position size
             position_value = max(position_value, 1.0)  # Minimum $1
             
             # Get current quote
@@ -372,8 +422,6 @@ class SimpleStrategy:
             # Track the order and position
             self.pending_orders[symbol] = order.id
             self.active_positions[symbol] = trade
-            
-            # Increment daily trade count
             self.daily_trades_count += 1
             
             self.logger.info(f"Buy order placed for {symbol}: ${position_value:.2f} ({quantity:.4f} shares) at ${current_price:.2f}")
@@ -389,17 +437,9 @@ class SimpleStrategy:
         except Exception as e:
             self.logger.error(f"Error executing buy order for {symbol}: {e}")
             return None
-    
+
     def _execute_sell_order(self, symbol: str, reason: str) -> Optional[Trade]:
-        """Execute a sell order.
-        
-        Args:
-            symbol: Stock symbol.
-            reason: Reason for the trade.
-            
-        Returns:
-            Trade object if successful, None otherwise.
-        """
+        """Execute a sell order."""
         try:
             # Check if we have a position
             if symbol not in self.active_positions:
@@ -443,10 +483,8 @@ class SimpleStrategy:
             # Track the order
             self.pending_orders[symbol] = order.id
             
-            # Remove from active positions (will be re-added if partial fill)
+            # Remove from active positions
             del self.active_positions[symbol]
-            
-            # Increment daily trade count
             self.daily_trades_count += 1
             
             self.logger.info(f"Sell order placed for {symbol}: {quantity:.4f} shares at ${current_price:.2f}")
@@ -462,74 +500,112 @@ class SimpleStrategy:
         except Exception as e:
             self.logger.error(f"Error executing sell order for {symbol}: {e}")
             return None
-    
+
+    def get_active_positions(self) -> Dict[str, Trade]:
+        """Get active positions."""
+        return self.active_positions.copy()
+
+    def get_daily_trades_count(self) -> int:
+        """Get daily trades count."""
+        self._reset_daily_counters_if_needed()
+        return self.daily_trades_count
+
+    def update_position_status(self, symbol: str, status: TradeStatus):
+        """Update position status."""
+        if symbol in self.active_positions:
+            self.active_positions[symbol].status = status
+
+    def remove_position(self, symbol: str):
+        """Remove a position from active positions."""
+        if symbol in self.active_positions:
+            del self.active_positions[symbol]
+        if symbol in self.pending_orders:
+            del self.pending_orders[symbol]
+
     def update_positions(self) -> None:
-        """Update position status and handle filled orders."""
+        """Update active positions and pending orders."""
         try:
-            # Get current positions from Alpaca
-            positions = self.alpaca_client.get_positions()
-            alpaca_positions = {pos.symbol: pos for pos in positions}
+            # Check pending orders
+            for symbol, order_id in list(self.pending_orders.items()):
+                # Validate order_id before making API call
+                if not order_id or not isinstance(order_id, str) or order_id.strip() == "":
+                    self.logger.warning(f"Invalid order_id for {symbol}: {order_id}. Removing from pending orders.")
+                    del self.pending_orders[symbol]
+                    continue
+                    
+                try:
+                    order = self.alpaca_client.get_order(order_id)
+                    if not order:
+                        continue
+                    
+                    if order.status == 'filled':
+                        # Update position status
+                        if symbol in self.active_positions:
+                            self.active_positions[symbol].status = TradeStatus.FILLED
+                            self.logger.info(f"Order filled for {symbol}: {order.side} {order.qty} shares at ${order.filled_avg_price}")
+                        
+                        # Trigger callbacks
+                        if self.account_update_callback:
+                            self.account_update_callback()
+                        if self.order_update_callback:
+                            self.order_update_callback()
+                        if self.position_update_callback:
+                            self.position_update_callback()
+                            
+                        del self.pending_orders[symbol]
+                        
+                    elif order.status in ['cancelled', 'rejected', 'expired']:
+                        # Handle cancelled/rejected orders
+                        if symbol in self.active_positions:
+                            self.logger.info(f"Order {order.status} for {symbol}: {order.side} {order.qty} shares")
+                            # Remove from active positions if order was cancelled
+                            del self.active_positions[symbol]
+                        
+                        # Trigger callbacks
+                        if self.order_update_callback:
+                            self.order_update_callback()
+                        if self.position_update_callback:
+                            self.position_update_callback()
+                            
+                        del self.pending_orders[symbol]
+                        
+                except Exception as e:
+                    self.logger.error(f"Error checking order {order_id} for {symbol}: {e}")
+                    continue
             
-            # Update active positions based on Alpaca positions
-            symbols_to_remove = []
-            for symbol in self.active_positions:
-                if symbol not in alpaca_positions:
-                    # Position was closed
-                    symbols_to_remove.append(symbol)
-                else:
-                    # Update quantity if different
-                    alpaca_pos = alpaca_positions[symbol]
-                    current_qty = float(alpaca_pos.qty)
-                    if current_qty != self.active_positions[symbol].quantity:
-                        self.active_positions[symbol].quantity = current_qty
-            
-            # Remove closed positions
-            for symbol in symbols_to_remove:
-                del self.active_positions[symbol]
-                self.logger.info(f"Position closed for {symbol}")
-            
-            # Check for new positions not in our tracking
-            for symbol, alpaca_pos in alpaca_positions.items():
-                if symbol not in self.active_positions:
-                    # New position (possibly from manual trade)
-                    trade = Trade(
-                        symbol=symbol,
-                        trade_type=TradeType.BUY,
-                        quantity=float(alpaca_pos.qty),
-                        price=float(alpaca_pos.avg_entry_price),
-                        timestamp=datetime.now(),
-                        order_id="manual",
-                        status=TradeStatus.FILLED,
-                        notes="Manual or external trade"
-                    )
-                    self.active_positions[symbol] = trade
-                    self.logger.info(f"New position detected for {symbol}: {trade.quantity:.4f} shares")
-            
+            # Check exit conditions for active positions
+            for symbol in list(self.active_positions.keys()):
+                try:
+                    # Get current price
+                    quote = self.alpaca_client.get_latest_quote(symbol)
+                    if not quote:
+                        continue
+                        
+                    current_price = quote.get('bid', 0)
+                    if current_price <= 0:
+                        continue
+                    
+                    trade = self.active_positions[symbol]
+                    
+                    # Check stop loss
+                    if trade.trade_type == TradeType.BUY:
+                        stop_loss_price = trade.price * (1 - self.stop_loss_pct)
+                        take_profit_price = trade.price * (1 + self.take_profit_pct)
+                        
+                        if current_price <= stop_loss_price:
+                            self.logger.info(f"Stop loss triggered for {symbol} at ${current_price:.2f}")
+                            self.execute_sell_order(symbol, "Stop loss triggered")
+                        elif current_price >= take_profit_price:
+                            self.logger.info(f"Take profit triggered for {symbol} at ${current_price:.2f}")
+                            self.execute_sell_order(symbol, "Take profit triggered")
+                            
+                except Exception as e:
+                    self.logger.error(f"Error checking exit conditions for {symbol}: {e}")
+                    continue
+                    
         except Exception as e:
-            self.logger.error(f"Error updating positions: {e}")
-    
-    def get_strategy_status(self) -> Dict:
-        """Get current strategy status.
-        
-        Returns:
-            Dictionary with strategy status information.
-        """
-        return {
-            'trading_mode': self.trading_mode.value,
-            'active_positions': len(self.active_positions),
-            'pending_orders': len(self.pending_orders),
-            'daily_trades': self.daily_trades_count,
-            'max_daily_trades': self.max_daily_trades,
-            'positions': {symbol: {
-                'quantity': trade.quantity,
-                'entry_price': trade.price,
-                'notes': trade.notes
-            } for symbol, trade in self.active_positions.items()},
-            'strategy_parameters': {
-                'position_size_pct': self.position_size_pct,
-                'stop_loss_pct': self.stop_loss_pct,
-                'take_profit_pct': self.take_profit_pct,
-                'rsi_oversold': self.rsi_oversold,
-                'rsi_overbought': self.rsi_overbought
-            }
-        }
+            self.logger.error(f"Error in update_positions: {e}")
+
+
+# Keep backward compatibility
+SimpleStrategy = EnhancedStrategy

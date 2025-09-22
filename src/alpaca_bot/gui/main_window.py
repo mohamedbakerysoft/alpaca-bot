@@ -67,6 +67,9 @@ class MainWindow:
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
         
         self.logger.info("Main window initialized")
+        
+        # Add startup message about trading status
+        self.root.after(2000, self._show_startup_message)  # Show message after 2 seconds
     
     def _create_menu(self) -> None:
         """Create the application menu bar."""
@@ -206,6 +209,11 @@ class MainWindow:
         notebook.add(orders_frame, text="Orders")
         self._create_orders_display(orders_frame)
         
+        # Trading Log tab
+        log_frame = ttk.Frame(notebook)
+        notebook.add(log_frame, text="Trading Log")
+        self._create_log_display(log_frame)
+        
         # Configuration panel
         from ..config.settings import settings
         self.config_panel = ConfigPanel(notebook, settings, self._on_config_changed)
@@ -277,6 +285,73 @@ class MainWindow:
         self.orders_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
         orders_scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
         
+        # Start periodic order updates
+        self._start_order_updates()
+    
+    def _create_log_display(self, parent: ttk.Frame) -> None:
+        """Create the trading log display.
+        
+        Args:
+            parent: Parent frame.
+        """
+        # Create scrolled text widget for log messages
+        self.log_text = scrolledtext.ScrolledText(
+            parent,
+            wrap=tk.WORD,
+            height=15,
+            font=('Consolas', 9),
+            state=tk.DISABLED
+        )
+        self.log_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Configure text tags for different message types
+        self.log_text.tag_configure('info', foreground='blue')
+        self.log_text.tag_configure('success', foreground='green')
+        self.log_text.tag_configure('warning', foreground='orange')
+        self.log_text.tag_configure('error', foreground='red')
+        self.log_text.tag_configure('trade', foreground='purple', font=('Consolas', 9, 'bold'))
+    
+    def _log_message(self, message: str, message_type: str = 'info') -> None:
+        """Log a message to the trading log display.
+        
+        Args:
+            message: Message to log.
+            message_type: Type of message (info, success, warning, error, trade).
+        """
+        if not hasattr(self, 'log_text'):
+            # If log display not created yet, just use logger
+            self.logger.info(message)
+            return
+        
+        # Get current time
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        
+        # Format message with timestamp
+        formatted_message = f"[{timestamp}] {message}\n"
+        
+        # Add message to log display
+        self.log_text.config(state=tk.NORMAL)
+        self.log_text.insert(tk.END, formatted_message, message_type)
+        self.log_text.config(state=tk.DISABLED)
+        
+        # Auto-scroll to bottom
+        self.log_text.see(tk.END)
+        
+        # Also log to file
+        if message_type == 'error':
+            self.logger.error(message)
+        elif message_type == 'warning':
+            self.logger.warning(message)
+        else:
+            self.logger.info(message)
+        
+        # Limit log size (keep last 1000 lines)
+        lines = self.log_text.get('1.0', tk.END).split('\n')
+        if len(lines) > 1000:
+            self.log_text.config(state=tk.NORMAL)
+            self.log_text.delete('1.0', f'{len(lines) - 1000}.0')
+            self.log_text.config(state=tk.DISABLED)
+    
         # Configure status-based row colors
         self.orders_tree.tag_configure('filled', background='#d4edda')
         self.orders_tree.tag_configure('pending', background='#fff3cd')
@@ -317,9 +392,6 @@ class MainWindow:
         
         # Update time display
         self._update_time_display()
-        
-        # Start order status updates
-        self._start_order_updates()
     
     def _initialize_api_client(self) -> None:
         """Initialize the Alpaca API client."""
@@ -490,7 +562,7 @@ class MainWindow:
             self.trading_thread.start()
             
             self.logger.info("Trading started")
-            self._log_message("Trading started")
+            self._log_message("Trading started", "success")
         
         def _handle_start_error(error: Exception) -> None:
             """Handle trading start errors."""
@@ -517,7 +589,7 @@ class MainWindow:
             self.start_stop_btn.config(text="Start Trading", style="Accent.TButton")
             
             self.logger.info("Trading stopped")
-            self._log_message("Trading stopped")
+            self._log_message("Trading stopped", "warning")
             return True
         
         safe_execute(
@@ -561,7 +633,8 @@ class MainWindow:
                             trade = self.strategy.execute_trade(symbol, signal_type, reason)
                             if trade:
                                 self._log_message(
-                                    f"{signal_type} signal executed for {symbol}: {reason}"
+                                    f"{signal_type} signal executed for {symbol}: {reason}",
+                                    "trade"
                                 )
                         
                         # Update displays
@@ -603,22 +676,22 @@ class MainWindow:
             error: The exception that occurred.
         """
         if isinstance(error, MarketDataError):
-            self._log_message(f"Market data unavailable for {symbol}")
+            self._log_message(f"Market data unavailable for {symbol}", "warning")
         elif isinstance(error, OrderExecutionError):
-            self._log_message(f"Order execution failed for {symbol}: {error}")
+            self._log_message(f"Order execution failed for {symbol}: {error}", "error")
             messagebox.showwarning(
                 "Order Failed",
                 f"Failed to execute order for {symbol}. Check your account status."
             )
         elif isinstance(error, RateLimitError):
-            self._log_message("Rate limit exceeded, pausing trading")
+            self._log_message("Rate limit exceeded, pausing trading", "error")
             self.is_trading = False
             messagebox.showwarning(
                 "Rate Limit",
                 "API rate limit exceeded. Trading has been paused."
             )
         else:
-            self._log_message(f"Error processing {symbol}: {error}")
+            self._log_message(f"Error processing {symbol}: {error}", "error")
     
     def _handle_critical_trading_error(self, error: Exception) -> None:
         """Handle critical trading loop errors.
@@ -930,6 +1003,18 @@ class MainWindow:
         )
     
 
+    
+    def _show_startup_message(self) -> None:
+        """Show startup message about trading status."""
+        if not self.is_trading:
+            self._log_message(
+                "التطبيق جاهز! اضغط على 'Start Trading' لبدء التحليف والتداول التلقائي",
+                "info"
+            )
+            self._log_message(
+                "Application ready! Click 'Start Trading' to begin analysis and automated trading",
+                "info"
+            )
     
     def _show_settings(self) -> None:
         """Show settings dialog."""
