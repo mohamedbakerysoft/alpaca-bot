@@ -26,7 +26,7 @@ from ..utils.error_handler import (
 from ..utils.market_utils import market_hours
 from .stock_selector import StockSelectorFrame
 from .trading_panel import TradingPanel
-from .performance_display import PerformanceDisplay
+
 from .config_panel import ConfigPanel
 
 
@@ -196,16 +196,6 @@ class MainWindow:
         notebook = ttk.Notebook(parent)
         notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Performance tab
-        perf_frame = ttk.Frame(notebook)
-        notebook.add(perf_frame, text="Performance")
-        self.performance_display = PerformanceDisplay(perf_frame)
-        
-        # Log tab
-        log_frame = ttk.Frame(notebook)
-        notebook.add(log_frame, text="Trading Log")
-        self._create_log_display(log_frame)
-        
         # Positions tab
         positions_frame = ttk.Frame(notebook)
         notebook.add(positions_frame, text="Positions")
@@ -220,36 +210,6 @@ class MainWindow:
         from ..config.settings import settings
         self.config_panel = ConfigPanel(notebook, settings, self._on_config_changed)
     
-    def _create_log_display(self, parent: ttk.Frame) -> None:
-        """Create the log display.
-        
-        Args:
-            parent: Parent frame.
-        """
-        # Log text area
-        self.log_text = scrolledtext.ScrolledText(
-            parent,
-            wrap=tk.WORD,
-            height=20,
-            font=('Consolas', 9)
-        )
-        self.log_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Log controls
-        log_controls = ttk.Frame(parent)
-        log_controls.pack(fill=tk.X, padx=5, pady=5)
-        
-        ttk.Button(
-            log_controls,
-            text="Clear Log",
-            command=self._clear_log
-        ).pack(side=tk.LEFT, padx=(0, 5))
-        
-        ttk.Button(
-            log_controls,
-            text="Refresh",
-            command=self._refresh_log
-        ).pack(side=tk.LEFT)
     
     def _create_positions_display(self, parent: ttk.Frame) -> None:
         """Create the positions display.
@@ -699,14 +659,6 @@ class MainWindow:
                 except Exception as e:
                     self.logger.error(f"Error updating account info: {e}")
         
-        def _update_performance():
-            if hasattr(self, 'performance_display'):
-                # Get current trades from strategy if available
-                trades = []
-                if hasattr(self, 'strategy') and self.strategy:
-                    trades = getattr(self.strategy, 'completed_trades', [])
-                self.performance_display.update_trades(trades)
-        
         # Update each display component safely
         safe_execute(
             _update_positions,
@@ -722,12 +674,6 @@ class MainWindow:
         
         safe_execute(
             _update_account,
-            default_return=None,
-            log_errors=True
-        )
-        
-        safe_execute(
-            _update_performance,
             default_return=None,
             log_errors=True
         )
@@ -983,26 +929,7 @@ class MainWindow:
             log_errors=True
         )
     
-    def _log_message(self, message: str) -> None:
-        """Add a message to the log display.
-        
-        Args:
-            message: Message to log.
-        """
-        timestamp = datetime.now().strftime('%H:%M:%S')
-        log_entry = f"[{timestamp}] {message}\n"
-        
-        self.log_text.insert(tk.END, log_entry)
-        self.log_text.see(tk.END)
-    
-    def _clear_log(self) -> None:
-        """Clear the log display."""
-        self.log_text.delete(1.0, tk.END)
-    
-    def _refresh_log(self) -> None:
-        """Refresh the log display."""
-        # This could be enhanced to read from log files
-        pass
+
     
     def _show_settings(self) -> None:
         """Show settings dialog."""
