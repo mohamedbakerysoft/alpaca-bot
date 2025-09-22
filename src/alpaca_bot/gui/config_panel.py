@@ -111,14 +111,6 @@ class ConfigPanel:
             'chart_timeframe': tk.StringVar(value='1Min'),
             'max_bars_history': tk.IntVar(value=1000),
             
-            # Auto-selection criteria
-            'auto_select_enabled': tk.BooleanVar(value=False),
-            'auto_select_max_symbols': tk.IntVar(value=10),
-            'auto_select_min_volume': tk.IntVar(value=1000000),
-            'auto_select_min_price': tk.DoubleVar(value=10.0),
-            'auto_select_max_price': tk.DoubleVar(value=500.0),
-            'auto_select_min_volatility': tk.DoubleVar(value=0.02),
-            
             # Logging
             'log_level': tk.StringVar(value='INFO'),
             'log_to_file': tk.BooleanVar(value=True),
@@ -143,9 +135,6 @@ class ConfigPanel:
         
         # Trading Hours tab
         self._create_trading_hours_tab()
-        
-        # Auto-Selection tab
-        self._create_auto_selection_tab()
         
         # Data & Display tab
         self._create_data_tab()
@@ -459,27 +448,7 @@ class ConfigPanel:
             command=lambda: self._set_trading_hours(9, 30, 10, 30)
         ).pack(side=tk.LEFT, padx=5)
     
-    def _create_auto_selection_tab(self) -> None:
-        """Create auto-selection tab."""
-        auto_frame = ttk.Frame(self.notebook)
-        self.notebook.add(auto_frame, text="Auto-Selection")
-        
-        # Enable auto-selection
-        ttk.Checkbutton(
-            auto_frame,
-            text="Enable Auto-Selection",
-            variable=self.config_vars['auto_select_enabled']
-        ).pack(anchor=tk.W, padx=5, pady=5)
-        
-        # Selection criteria
-        criteria_frame = ttk.LabelFrame(auto_frame, text="Selection Criteria", padding=10)
-        criteria_frame.pack(fill=tk.X, padx=5, pady=5)
-        
-        self._create_labeled_spinbox(criteria_frame, "Max Symbols:", 'auto_select_max_symbols', 1, 50, row=0)
-        self._create_labeled_entry(criteria_frame, "Min Volume:", 'auto_select_min_volume', row=1)
-        self._create_labeled_entry(criteria_frame, "Min Price ($):", 'auto_select_min_price', row=2)
-        self._create_labeled_entry(criteria_frame, "Max Price ($):", 'auto_select_max_price', row=3)
-        self._create_labeled_entry(criteria_frame, "Min Volatility:", 'auto_select_min_volatility', row=4)
+
     
     def _create_data_tab(self) -> None:
         """Create data and display tab."""
@@ -834,14 +803,6 @@ class ConfigPanel:
                 'chart_timeframe': 'CHART_TIMEFRAME',
                 'max_bars_history': 'MAX_BARS_HISTORY',
                 
-                # Auto-selection
-                'auto_select_enabled': 'AUTO_SELECT_ENABLED',
-                'auto_select_max_symbols': 'AUTO_SELECT_MAX_SYMBOLS',
-                'auto_select_min_volume': 'AUTO_SELECT_MIN_VOLUME',
-                'auto_select_min_price': 'AUTO_SELECT_MIN_PRICE',
-                'auto_select_max_price': 'AUTO_SELECT_MAX_PRICE',
-                'auto_select_min_volatility': 'AUTO_SELECT_MIN_VOLATILITY',
-                
                 # Logging
                 'log_level': 'LOG_LEVEL',
                 'log_to_file': 'LOG_TO_FILE',
@@ -909,14 +870,6 @@ class ConfigPanel:
                 'DATA_UPDATE_INTERVAL': 'data_update_interval',
                 'CHART_TIMEFRAME': 'chart_timeframe',
                 'MAX_BARS_HISTORY': 'max_bars_history',
-                
-                # Auto-selection
-                'AUTO_SELECT_ENABLED': 'auto_select_enabled',
-                'AUTO_SELECT_MAX_SYMBOLS': 'auto_select_max_symbols',
-                'AUTO_SELECT_MIN_VOLUME': 'auto_select_min_volume',
-                'AUTO_SELECT_MIN_PRICE': 'auto_select_min_price',
-                'AUTO_SELECT_MAX_PRICE': 'auto_select_max_price',
-                'AUTO_SELECT_MIN_VOLATILITY': 'auto_select_min_volatility',
                 
                 # Logging
                 'LOG_LEVEL': 'log_level',

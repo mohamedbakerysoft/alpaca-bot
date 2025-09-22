@@ -2,21 +2,16 @@
 
 This module provides:
 - Manual stock selection via dropdown
-- Auto-selection of optimal stocks for scalping
 - Popular stock presets
 - Custom symbol input
 """
 
-import logging
 import tkinter as tk
 from tkinter import ttk, messagebox
-from typing import List, Callable, Optional, Dict, Any
-import threading
-import pandas as pd
+from typing import List, Callable, Optional
 
 from ..services.alpaca_client import AlpacaClient
 from ..utils.logging_utils import get_logger
-from ..utils.technical_analysis import calculate_volatility
 
 
 class StockSelectorFrame:
@@ -55,52 +50,17 @@ class StockSelectorFrame:
     
     def _create_widgets(self) -> None:
         """Create the selector widgets."""
-        # Selection mode
-        mode_frame = ttk.Frame(self.frame)
-        mode_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        ttk.Label(mode_frame, text="Selection Mode:").pack(side=tk.LEFT)
-        
-        self.mode_var = tk.StringVar(value="manual")
-        
-        manual_radio = ttk.Radiobutton(
-            mode_frame,
-            text="Manual",
-            variable=self.mode_var,
-            value="manual",
-            command=self._on_mode_changed
-        )
-        manual_radio.pack(side=tk.LEFT, padx=(10, 5))
-        
-        auto_radio = ttk.Radiobutton(
-            mode_frame,
-            text="Auto-Select",
-            variable=self.mode_var,
-            value="auto",
-            command=self._on_mode_changed
-        )
-        auto_radio.pack(side=tk.LEFT, padx=5)
-        
         # Manual selection frame
         self.manual_frame = ttk.Frame(self.frame)
         self.manual_frame.pack(fill=tk.X, pady=(0, 10))
         
         self._create_manual_selection()
         
-        # Auto selection frame
-        self.auto_frame = ttk.Frame(self.frame)
-        self.auto_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        self._create_auto_selection()
-        
         # Selected symbols display
         self._create_symbols_display()
         
         # Set popular stocks as selected by default after all widgets are created
         self._update_manual_selection()
-        
-        # Initially show manual mode
-        self._on_mode_changed()
     
     def _create_manual_selection(self) -> None:
         """Create manual selection widgets."""
@@ -169,99 +129,7 @@ class StockSelectorFrame:
         for i in range(len(presets)):
             preset_frame.columnconfigure(i, weight=1)
     
-    def _create_auto_selection(self) -> None:
-        """Create auto selection widgets."""
-        # Auto selection parameters
-        params_frame = ttk.LabelFrame(self.auto_frame, text="Selection Criteria", padding=5)
-        params_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        # Max symbols
-        max_frame = ttk.Frame(params_frame)
-        max_frame.pack(fill=tk.X, pady=2)
-        
-        ttk.Label(max_frame, text="Max Symbols:").pack(side=tk.LEFT)
-        
-        self.max_symbols_var = tk.IntVar(value=5)
-        max_spinbox = ttk.Spinbox(
-            max_frame,
-            from_=1,
-            to=20,
-            width=5,
-            textvariable=self.max_symbols_var
-        )
-        max_spinbox.pack(side=tk.LEFT, padx=(5, 0))
-        
-        # Min volume
-        volume_frame = ttk.Frame(params_frame)
-        volume_frame.pack(fill=tk.X, pady=2)
-        
-        ttk.Label(volume_frame, text="Min Volume (M):").pack(side=tk.LEFT)
-        
-        self.min_volume_var = tk.DoubleVar(value=1.0)
-        volume_spinbox = ttk.Spinbox(
-            volume_frame,
-            from_=0.1,
-            to=100.0,
-            increment=0.1,
-            width=8,
-            textvariable=self.min_volume_var
-        )
-        volume_spinbox.pack(side=tk.LEFT, padx=(5, 0))
-        
-        # Price range
-        price_frame = ttk.Frame(params_frame)
-        price_frame.pack(fill=tk.X, pady=2)
-        
-        ttk.Label(price_frame, text="Price Range:").pack(side=tk.LEFT)
-        
-        self.min_price_var = tk.DoubleVar(value=10.0)
-        min_price_spinbox = ttk.Spinbox(
-            price_frame,
-            from_=1.0,
-            to=1000.0,
-            increment=1.0,
-            width=8,
-            textvariable=self.min_price_var
-        )
-        min_price_spinbox.pack(side=tk.LEFT, padx=(5, 5))
-        
-        ttk.Label(price_frame, text="to").pack(side=tk.LEFT)
-        
-        self.max_price_var = tk.DoubleVar(value=500.0)
-        max_price_spinbox = ttk.Spinbox(
-            price_frame,
-            from_=1.0,
-            to=10000.0,
-            increment=1.0,
-            width=8,
-            textvariable=self.max_price_var
-        )
-        max_price_spinbox.pack(side=tk.LEFT, padx=(5, 0))
-        
-        # Volatility filter
-        volatility_frame = ttk.Frame(params_frame)
-        volatility_frame.pack(fill=tk.X, pady=2)
-        
-        self.volatility_filter_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            volatility_frame,
-            text="Filter by volatility (good for scalping)",
-            variable=self.volatility_filter_var
-        ).pack(side=tk.LEFT)
-        
-        # Auto select button
-        button_frame = ttk.Frame(self.auto_frame)
-        button_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        self.auto_select_btn = ttk.Button(
-            button_frame,
-            text="Auto-Select Stocks",
-            command=self._auto_select_stocks
-        )
-        self.auto_select_btn.pack(side=tk.LEFT)
-        
-        self.auto_status = ttk.Label(button_frame, text="")
-        self.auto_status.pack(side=tk.LEFT, padx=(10, 0))
+
     
     def _create_symbols_display(self) -> None:
         """Create selected symbols display."""
@@ -302,16 +170,7 @@ class StockSelectorFrame:
         self.count_label = ttk.Label(button_frame, text="0 symbols selected")
         self.count_label.pack(side=tk.RIGHT)
     
-    def _on_mode_changed(self) -> None:
-        """Handle selection mode change."""
-        mode = self.mode_var.get()
-        
-        if mode == "manual":
-            self.manual_frame.pack(fill=tk.X, pady=(0, 10))
-            self.auto_frame.pack_forget()
-        else:
-            self.auto_frame.pack(fill=tk.X, pady=(0, 10))
-            self.manual_frame.pack_forget()
+
     
     def _update_manual_selection(self) -> None:
         """Update selection based on manual checkboxes."""
@@ -386,163 +245,7 @@ class StockSelectorFrame:
         
         self._update_manual_selection()
     
-    def _auto_select_stocks(self) -> None:
-        """Auto-select stocks based on criteria."""
-        if not self.alpaca_client:
-            messagebox.showerror(
-                "Error",
-                "Alpaca client not available for auto-selection"
-            )
-            return
-        
-        # Disable button and show status
-        self.auto_select_btn.config(state='disabled')
-        self.auto_status.config(text="Analyzing stocks...")
-        
-        # Run in thread to avoid blocking UI
-        thread = threading.Thread(
-            target=self._auto_select_worker,
-            daemon=True
-        )
-        thread.start()
-    
-    def _auto_select_worker(self) -> None:
-        """Worker thread for auto-selection."""
-        try:
-            # Get selection criteria
-            max_symbols = self.max_symbols_var.get()
-            min_volume = self.min_volume_var.get() * 1_000_000  # Convert to actual volume
-            min_price = self.min_price_var.get()
-            max_price = self.max_price_var.get()
-            use_volatility = self.volatility_filter_var.get()
-            
-            # Get tradable assets
-            assets = self.alpaca_client.get_tradable_assets()
-            if not assets:
-                raise Exception("Could not get tradable assets")
-            
-            # Filter by basic criteria
-            candidates = []
-            
-            for asset in assets:
-                if not asset.tradable or not asset.shortable:
-                    continue
-                
-                symbol = asset.symbol
-                
-                try:
-                    # Get latest quote
-                    quote = self.alpaca_client.get_latest_quote(symbol)
-                    if not quote:
-                        continue
-                    
-                    price = quote.bid
-                    if price < min_price or price > max_price:
-                        continue
-                    
-                    # Get recent bars for volume check
-                    bars = self.alpaca_client.get_bars(
-                        symbol,
-                        timeframe='1Day',
-                        limit=5
-                    )
-                    
-                    if not bars:
-                        continue
-                    
-                    # Check average volume
-                    avg_volume = sum(bar.volume for bar in bars) / len(bars)
-                    if avg_volume < min_volume:
-                        continue
-                    
-                    # Calculate volatility if requested
-                    volatility_score = 0
-                    if use_volatility:
-                        try:
-                            # Get more bars for volatility calculation
-                            vol_bars = self.alpaca_client.get_bars(
-                                symbol,
-                                timeframe='1Hour',
-                                limit=50
-                            )
-                            
-                            if vol_bars and len(vol_bars) >= 20:
-                                closes = [bar.close for bar in vol_bars]
-                                vol_df = pd.DataFrame({'close': closes})
-                                volatility_score = calculate_volatility(vol_df)
-                            
-                        except Exception as e:
-                            self.logger.debug(f"Could not calculate volatility for {symbol}: {e}")
-                    
-                    candidates.append({
-                        'symbol': symbol,
-                        'price': price,
-                        'volume': avg_volume,
-                        'volatility': volatility_score
-                    })
-                    
-                    # Update status
-                    self.frame.after(0, lambda: self.auto_status.config(
-                        text=f"Analyzed {len(candidates)} candidates..."
-                    ))
-                    
-                except Exception as e:
-                    self.logger.debug(f"Error analyzing {symbol}: {e}")
-                    continue
-            
-            # Sort candidates
-            if use_volatility:
-                # Sort by volatility (higher is better for scalping)
-                candidates.sort(key=lambda x: x['volatility'], reverse=True)
-            else:
-                # Sort by volume (higher is better)
-                candidates.sort(key=lambda x: x['volume'], reverse=True)
-            
-            # Select top candidates
-            selected_symbols = [c['symbol'] for c in candidates[:max_symbols]]
-            
-            # Update UI in main thread
-            self.frame.after(0, lambda: self._auto_select_complete(selected_symbols))
-            
-        except Exception as e:
-            self.logger.error(f"Error in auto-selection: {e}")
-            self.frame.after(0, lambda: self._auto_select_error(str(e)))
-    
-    def _auto_select_complete(self, symbols: List[str]) -> None:
-        """Complete auto-selection.
-        
-        Args:
-            symbols: Selected symbols.
-        """
-        self._update_selected_symbols(symbols)
-        
-        self.auto_select_btn.config(state='normal')
-        self.auto_status.config(text=f"Selected {len(symbols)} stocks")
-        
-        if symbols:
-            messagebox.showinfo(
-                "Auto-Selection Complete",
-                f"Selected {len(symbols)} stocks:\n{', '.join(symbols)}"
-            )
-        else:
-            messagebox.showwarning(
-                "No Stocks Found",
-                "No stocks met the specified criteria. Try adjusting the parameters."
-            )
-    
-    def _auto_select_error(self, error: str) -> None:
-        """Handle auto-selection error.
-        
-        Args:
-            error: Error message.
-        """
-        self.auto_select_btn.config(state='normal')
-        self.auto_status.config(text="Error occurred")
-        
-        messagebox.showerror(
-            "Auto-Selection Error",
-            f"Error during auto-selection: {error}"
-        )
+
     
     def _update_selected_symbols(self, symbols: List[str]) -> None:
         """Update the selected symbols list.
