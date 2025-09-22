@@ -259,10 +259,9 @@ setup_environment_config() {
     
     cd "$REMOTE_DIR"
     
-    # Copy Pi-specific environment file if it exists
-    if [[ -f ".env.pi" ]]; then
-        cp ".env.pi" ".env"
-        log_info "Copied .env.pi to .env"
+    # Ensure .env file exists
+    if [[ -f ".env" ]]; then
+        log_info "Using existing .env file"
     elif [[ -f ".env.example" ]]; then
         cp ".env.example" ".env"
         log_info "Copied .env.example to .env"

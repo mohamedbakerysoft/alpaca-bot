@@ -75,7 +75,7 @@ get_local_checksums() {
     fi
     
     # Calculate checksums for other important files
-    for file in "pyproject.toml" ".env.pi" "install_pi.sh" "start_bot.sh" "stop_bot.sh" "status_bot.sh"; do
+    for file in "pyproject.toml" ".env" "install_pi.sh" "start_bot.sh" "stop_bot.sh" "status_bot.sh"; do
         if [ -f "$file" ]; then
             md5sum "$file" >> "$checksum_file"
         fi
@@ -109,7 +109,7 @@ get_remote_checksums() {
         fi
         
         # Calculate checksums for other important files
-        for file in "pyproject.toml" ".env.pi" "install_pi.sh" "start_bot.sh" "stop_bot.sh" "status_bot.sh"; do
+        for file in "pyproject.toml" ".env" "install_pi.sh" "start_bot.sh" "stop_bot.sh" "status_bot.sh"; do
             if [ -f "alpaca-bot/$file" ]; then
                 md5sum "alpaca-bot/$file" >> "$checksum_file" 2>/dev/null || true
             elif [ -f "$file" ]; then
@@ -206,12 +206,14 @@ copy_files_to_pi() {
     fi
     
     # Copy other important files
-    for file in "pyproject.toml" ".env.pi" "install_pi.sh" "start_bot.sh" "stop_bot.sh" "status_bot.sh"; do
+    for file in "pyproject.toml" ".env" "install_pi.sh" "start_bot.sh" "stop_bot.sh" "status_bot.sh"; do
         if [ -f "$file" ]; then
             log_info "Copying $file..."
             scp "$file" "$PI_USER@$PI_HOST:$REMOTE_DIR/"
         fi
     done
+    
+
     
     log_success "Files copied successfully"
 }

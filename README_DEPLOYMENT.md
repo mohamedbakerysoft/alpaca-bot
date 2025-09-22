@@ -111,12 +111,13 @@ Use the Git deployment script for easy updates:
 
 ## Configuration Files
 
-### `.env.pi`
-Pi-specific environment configuration with optimized settings for:
-- Trading mode (ultra_safe by default)
-- Resource limits
+### `.env`
+Universal environment configuration that works for both local development and Pi deployment with:
+- Trading mode configuration
+- Resource limits and Pi-specific optimizations
 - Logging levels
 - Performance tuning
+- Hardware-specific settings (ignored on non-Pi systems)
 
 ### `requirements/pi.txt`
 Lightweight dependencies optimized for Raspberry Pi:
@@ -204,7 +205,7 @@ vcgencmd measure_temp
 
 1. **Memory Usage**
    - Monitor with `free -h`
-   - Adjust `MAX_MEMORY_MB` in `.env.pi`
+   - Adjust `MAX_MEMORY_MB` in `.env`
 
 2. **CPU Temperature**
    - Monitor with `vcgencmd measure_temp`
