@@ -7,7 +7,7 @@ This module provides utilities for:
 """
 
 import logging
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from typing import Tuple, Optional
 import pytz
 from ..config.settings import settings
@@ -116,7 +116,7 @@ class MarketHours:
             elif now_et.weekday() == 5:  # Saturday
                 days_to_add = 2  # Skip to Monday
             
-            next_open = next_open.replace(day=now_et.day + days_to_add)
+            next_open = next_open + timedelta(days=days_to_add)
         
         time_diff = next_open - now_et
         hours, remainder = divmod(time_diff.total_seconds(), 3600)
