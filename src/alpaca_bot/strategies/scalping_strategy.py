@@ -1413,15 +1413,14 @@ class ScalpingStrategy:
         current_price = stock_data.current_quote.bid
         symbol = stock_data.symbol
         
-        # 1. Market Sentiment Check (SPY trend analysis)
+        # 1. Market Sentiment Check (SPY trend analysis) - Made less restrictive
         market_sentiment = self._get_market_sentiment()
         if market_sentiment == "BEARISH":
-            self.logger.debug(f"{symbol}: Bearish market sentiment detected, avoiding new positions")
-            return False
-        elif market_sentiment == "NEUTRAL" and symbol not in ["SPY", "QQQ", "IWM"]:
-            # In neutral markets, only trade major ETFs
-            self.logger.debug(f"{symbol}: Neutral market, limiting to major ETFs only")
-            return False
+            self.logger.debug(f"{symbol}: Bearish market sentiment detected, but allowing trades with higher confidence")
+            # Don't return False immediately, let other conditions decide
+        elif market_sentiment == "NEUTRAL":
+            # Allow trading in neutral markets for all symbols
+            self.logger.debug(f"{symbol}: Neutral market conditions detected")
         
         # 2. Volatility Check (refined thresholds)
         if (stock_data.technical_indicators.bollinger_upper and 
@@ -1433,13 +1432,15 @@ class ScalpingStrategy:
             bb_middle = stock_data.technical_indicators.bollinger_middle
             bb_width = (bb_upper - bb_lower) / bb_middle
             
-            # Refined volatility thresholds
-            if bb_width > 0.20:  # Reduced from 0.25 for tighter control
-                self.logger.debug(f"{symbol}: High volatility detected (BB width: {bb_width:.3f})")
+            # More permissive volatility thresholds
+            if bb_width > 0.30:  # Increased threshold for high volatility
+                self.logger.debug(f"{symbol}: Extremely high volatility detected (BB width: {bb_width:.3f})")
                 return False
-            elif bb_width < 0.05:  # Too low volatility (no movement)
-                self.logger.debug(f"{symbol}: Very low volatility detected (BB width: {bb_width:.3f})")
+            elif bb_width < 0.01:  # Reduced threshold for low volatility
+                self.logger.debug(f"{symbol}: Extremely low volatility detected (BB width: {bb_width:.3f})")
                 return False
+            else:
+                self.logger.debug(f"{symbol}: Acceptable volatility (BB width: {bb_width:.3f})")
         
         # 3. RSI Extremes Check (refined)
         rsi = stock_data.technical_indicators.rsi
@@ -1483,7 +1484,7 @@ class ScalpingStrategy:
         """
         try:
             # Try to get SPY data for market sentiment
-            spy_data = self.data_manager.get_stock_data("SPY")
+            spy_data = self.analyze_symbol("SPY")
             if not spy_data or not spy_data.technical_indicators:
                 return "NEUTRAL"  # Default if no SPY data
             
