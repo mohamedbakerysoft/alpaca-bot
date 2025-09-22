@@ -312,10 +312,12 @@ deploy() {
     local remote_checksums
     remote_checksums=$(get_remote_checksums)
     
-    # Compare checksums
+    # Compare checksums (disable set -e temporarily to capture return code)
     local comparison_result
+    set +e
     compare_checksums "$local_checksums" "$remote_checksums"
     comparison_result=$?
+    set -e
     
     case $comparison_result in
         0)

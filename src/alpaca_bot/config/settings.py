@@ -6,7 +6,7 @@ and .env files for API keys and application settings.
 
 import os
 from pathlib import Path
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple, Dict, List
 
 from decouple import config
 
@@ -192,6 +192,17 @@ class Settings:
             default=800,
             cast=int
         )
+        
+        # Trading Symbols Configuration
+        # Default popular stocks for scalping if not specified in environment
+        default_symbols = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'NVDA', 'META', 'NFLX', 'AMD', 'INTC', 'SPY', 'QQQ', 'IWM', 'DIA', 'VTI']
+        symbols_str = config(
+            "SELECTED_SYMBOLS",
+            default=",".join(default_symbols),
+            cast=str
+        )
+        # Parse comma-separated symbols and clean them
+        self.selected_symbols: List[str] = [symbol.strip().upper() for symbol in symbols_str.split(",") if symbol.strip()]
         
         # Validate critical settings
         self._validate_settings()
