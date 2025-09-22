@@ -16,7 +16,7 @@ from typing import Dict, List, Optional
 
 from ..config.settings import settings
 from ..services.alpaca_client import AlpacaClient
-from ..strategies.scalping_strategy import ScalpingStrategy
+from ..strategies.simple_strategy import SimpleStrategy
 from ..utils.logging_utils import get_logger, setup_logging
 from ..utils.error_handler import (
     ErrorHandler, TradingBotError, APIConnectionError, 
@@ -40,7 +40,7 @@ class MainWindow:
         
         # Initialize components
         self.alpaca_client: Optional[AlpacaClient] = None
-        self.strategy: Optional[ScalpingStrategy] = None
+        self.strategy: Optional[SimpleStrategy] = None
         self.trading_thread: Optional[threading.Thread] = None
         self.is_trading = False
         self.selected_symbols: List[str] = []
@@ -336,10 +336,10 @@ class MainWindow:
                 # which is called periodically by _update_time_display
                 
                 # Initialize strategy with account and order update callbacks
-                self.strategy = ScalpingStrategy(
-                    self.alpaca_client, 
-                    account_update_callback=self._trigger_account_update,
-                    order_update_callback=self._trigger_order_update
+                self.strategy = SimpleStrategy(self.alpaca_client)
+                self.strategy.set_callbacks(
+                    account_callback=self._trigger_account_update,
+                    order_callback=self._trigger_order_update
                 )
                 
                 self.logger.info("API client initialized successfully")
