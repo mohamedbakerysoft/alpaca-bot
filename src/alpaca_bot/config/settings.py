@@ -6,7 +6,7 @@ and .env files for API keys and application settings.
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple, Dict
 
 from decouple import config
 
@@ -237,19 +237,19 @@ class Settings:
         """
         return self.paper_trading
     
-    def get_alpaca_credentials(self) -> tuple[str, str, str]:
+    def get_alpaca_credentials(self) -> Tuple[str, str, str]:
         """Get Alpaca API credentials.
         
         Returns:
-            tuple[str, str, str]: API key, secret key, and base URL.
+            Tuple[str, str, str]: API key, secret key, and base URL.
         """
         return self.alpaca_api_key, self.alpaca_secret_key, self.alpaca_base_url
     
-    def get_strategy_params(self) -> dict[str, float]:
+    def get_strategy_params(self) -> Dict[str, float]:
         """Get trading strategy parameters.
         
         Returns:
-            dict[str, float]: Dictionary containing strategy parameters.
+            Dict[str, float]: Dictionary containing strategy parameters.
         """
         return {
             "support_threshold": self.support_threshold,
