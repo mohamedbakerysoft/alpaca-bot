@@ -118,36 +118,75 @@ deploy_to_pi() {
     log_info "Branch: $branch"
     
     # Check Pi connectivity
-    if ! ssh -o ConnectTimeout=5 "$PI_USER@$PI_HOST" "echo 'Connected'" >/dev/null 2>&1; then
+    if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "$PI_USER@$PI_HOST" "echo 'Connected'" >/dev/null 2>&1; then
         log_error "Cannot connect to Raspberry Pi at $PI_HOST"
         return 1
     fi
     
-    # Create backup before deployment
-    create_backup
-    
     # Deploy to Pi
-    ssh "$PI_USER@$PI_HOST" << EOF
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "$PI_USER@$PI_HOST" << EOF
         set -e
         cd "$REMOTE_DIR"
+        
+        # Initialize Git repository if it doesn't exist
+        if [ ! -d ".git" ]; then
+            echo "Initializing Git repository..."
+            git init
+            git config --global init.defaultBranch main
+            
+            # Use SSH instead of HTTPS to avoid authentication issues
+            git remote add origin git@github.com:mohamed-mahdy/alpaca-bot.git || true
+            
+            # Try to fetch the specific branch
+            echo "Fetching branch $branch from remote..."
+            if git fetch origin "$branch" 2>/dev/null; then
+                echo "Branch $branch found on remote"
+                git checkout -b "$branch" origin/"$branch" || git checkout "$branch"
+            else
+                echo "Branch $branch not found on remote, creating local branch"
+                git checkout -b "$branch"
+            fi
+        else
+            echo "Git repository already exists"
+            # Ensure we're on the correct branch
+            git checkout "$branch" 2>/dev/null || git checkout -b "$branch"
+        fi
         
         # Stop the service
         sudo systemctl stop alpaca-bot.service || true
         
-        # Store current commit hash before pulling
-        CURRENT_COMMIT=\$(git rev-parse HEAD)
+        # Store current commit hash before pulling (if repository has commits)
+        if git rev-parse HEAD >/dev/null 2>&1; then
+            CURRENT_COMMIT=\$(git rev-parse HEAD)
+        else
+            CURRENT_COMMIT=""
+            echo "No commits found, this is a fresh repository"
+        fi
+        
+        # Configure git for non-interactive operation
+        export GIT_TERMINAL_PROMPT=0
         
         # Pull latest changes from the current branch
-        git pull origin "$branch"
+        echo "Pulling latest changes from origin/$branch..."
+        if [ -n "\$CURRENT_COMMIT" ]; then
+            git pull origin "$branch"
+        else
+            # For fresh repository, fetch and reset to remote branch
+            git fetch origin "$branch" && git reset --hard origin/"$branch" || echo "No remote branch to pull from"
+        fi
         
         # Get new commit hash after pulling
-        NEW_COMMIT=\$(git rev-parse HEAD)
+        if git rev-parse HEAD >/dev/null 2>&1; then
+            NEW_COMMIT=\$(git rev-parse HEAD)
+        else
+            NEW_COMMIT=""
+        fi
         
         # Check if there are any changes
-        if [ "\$CURRENT_COMMIT" = "\$NEW_COMMIT" ]; then
+        if [ -n "\$CURRENT_COMMIT" ] && [ -n "\$NEW_COMMIT" ] && [ "\$CURRENT_COMMIT" = "\$NEW_COMMIT" ]; then
             echo "No new commits found, skipping package installation"
             SKIP_PACKAGES=true
-        else
+        elif [ -n "\$CURRENT_COMMIT" ] && [ -n "\$NEW_COMMIT" ]; then
             echo "New commits detected, checking for package changes..."
             # Check if requirements files changed between commits
             if git diff --name-only "\$CURRENT_COMMIT" "\$NEW_COMMIT" | grep -q "requirements/"; then
@@ -157,6 +196,9 @@ deploy_to_pi() {
                 echo "No requirements changes detected, skipping package installation"
                 SKIP_PACKAGES=true
             fi
+        else
+            echo "Fresh deployment or unable to compare commits, will install packages"
+            SKIP_PACKAGES=false
         fi
         
         # Activate virtual environment
@@ -227,8 +269,8 @@ show_status() {
     echo
     
     log_info "Raspberry Pi Status:"
-    if ssh -o ConnectTimeout=5 "$PI_USER@$PI_HOST" "echo 'Connected'" >/dev/null 2>&1; then
-        ssh "$PI_USER@$PI_HOST" << 'EOF'
+    if ssh -o BatchMode=yes -o ConnectTimeout=5 "$PI_USER@$PI_HOST" "echo 'Connected'" >/dev/null 2>&1; then
+        ssh -o BatchMode=yes -o ConnectTimeout=10 "$PI_USER@$PI_HOST" << 'EOF'
             cd /home/jarvis/alpaca-bot
             echo "Pi branch: $(git branch --show-current)"
             echo "Pi commit: $(git log -1 --oneline)"
@@ -243,7 +285,7 @@ EOF
 # Show deployment status
 show_deployment_status() {
     log_info "Deployment Status:"
-    ssh "$PI_USER@$PI_HOST" << 'EOF'
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "$PI_USER@$PI_HOST" << 'EOF'
         cd /home/jarvis/alpaca-bot
         echo "Deployed commit: $(git log -1 --oneline)"
         echo "Service status: $(sudo systemctl is-active alpaca-bot.service)"
@@ -257,7 +299,7 @@ create_backup() {
     
     local timestamp=$(date +"%Y%m%d_%H%M%S")
     
-    ssh "$PI_USER@$PI_HOST" << EOF
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "$PI_USER@$PI_HOST" << EOF
         cd "$REMOTE_DIR"
         
         # Create backup directory if it doesn't exist
@@ -297,9 +339,12 @@ rollback_deployment() {
     # Create backup before rollback
     create_backup
     
-    ssh "$PI_USER@$PI_HOST" << EOF
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "$PI_USER@$PI_HOST" << EOF
         set -e
         cd "$REMOTE_DIR"
+        
+        # Configure git for non-interactive operation
+        export GIT_TERMINAL_PROMPT=0
         
         # Stop service
         sudo systemctl stop alpaca-bot.service
@@ -323,7 +368,7 @@ EOF
 show_logs() {
     log_info "Showing Raspberry Pi application logs..."
     
-    ssh "$PI_USER@$PI_HOST" << 'EOF'
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "$PI_USER@$PI_HOST" << 'EOF'
         # Show systemd logs
         echo "=== Systemd Service Logs ==="
         sudo journalctl -u alpaca-bot.service -n 50 --no-pager
@@ -342,7 +387,7 @@ EOF
 restart_application() {
     log_info "Restarting application on Raspberry Pi..."
     
-    ssh "$PI_USER@$PI_HOST" << 'EOF'
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "$PI_USER@$PI_HOST" << 'EOF'
         sudo systemctl restart alpaca-bot.service
         sleep 3
         sudo systemctl status alpaca-bot.service
@@ -355,7 +400,7 @@ EOF
 check_health() {
     log_info "Checking Raspberry Pi system health..."
     
-    ssh "$PI_USER@$PI_HOST" << 'EOF'
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "$PI_USER@$PI_HOST" << 'EOF'
         echo "=== System Information ==="
         uptime
         echo

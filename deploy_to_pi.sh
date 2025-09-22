@@ -59,6 +59,19 @@ EOF
     log_success "Remote directory structure created"
 }
 
+# Initialize Git repository on Pi
+initialize_git_repo() {
+    log_info "Initializing Git repository on Raspberry Pi..."
+    ssh "$PI_USER@$PI_HOST" << EOF
+        cd $REMOTE_DIR
+        if [ ! -d ".git" ]; then
+            git init
+            git remote add origin https://github.com/mohamed-mahdy/alpaca-bot.git || true
+        fi
+EOF
+    log_success "Git repository initialized"
+}
+
 # Install system dependencies on Pi
 install_system_dependencies() {
     log_info "Installing system dependencies on Raspberry Pi..."
@@ -220,6 +233,7 @@ main() {
     
     check_connection
     setup_remote_directory
+    initialize_git_repo
     install_system_dependencies
     sync_files
     setup_virtual_environment
