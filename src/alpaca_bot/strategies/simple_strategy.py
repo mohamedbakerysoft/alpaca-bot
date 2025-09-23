@@ -42,11 +42,11 @@ class EnhancedStrategy:
         self.settings = settings or globals()['settings']
         self.logger = logging.getLogger(__name__)
         
-        # Enhanced strategy parameters
-        self.position_size_pct = 0.03  # 3% of portfolio per trade
-        self.stop_loss_pct = 0.015     # 1.5% stop loss
-        self.take_profit_pct = 0.03    # 3% take profit
-        self.max_daily_trades = 8      # Maximum trades per day
+        # Enhanced strategy parameters - Using unified settings
+        self.position_size_pct = getattr(self.settings, 'max_position_percentage', 0.03)  # % of portfolio per trade
+        self.stop_loss_pct = getattr(self.settings, 'stop_loss_percentage', 0.015)     # Stop loss from settings
+        self.take_profit_pct = getattr(self.settings, 'take_profit_percentage', 0.03)    # Take profit from settings
+        self.max_daily_trades = getattr(self.settings, 'max_daily_trades', 8)      # Maximum trades per day from settings
         self.min_volume_threshold = 50000  # Reduced from 100000 to 50000 - Minimum daily volume
         
         # Technical indicator thresholds
@@ -71,6 +71,41 @@ class EnhancedStrategy:
         self.position_update_callback = None
         
         self.logger.info(f"Enhanced strategy initialized with optimized parameters")
+        self.logger.info(f"Using unified settings - Stop Loss: {self.stop_loss_pct:.4f} ({self.stop_loss_pct*100:.2f}%), Take Profit: {self.take_profit_pct:.4f} ({self.take_profit_pct*100:.2f}%)")
+        
+        # Load existing positions from Alpaca
+        self._load_existing_positions()
+
+    def _load_existing_positions(self):
+        """Load existing positions from Alpaca into the strategy's tracking system."""
+        try:
+            positions = self.alpaca_client.get_positions()
+            if positions:
+                for position in positions:
+                    symbol = position.symbol
+                    qty = float(position.qty)
+                    avg_entry_price = float(position.avg_entry_price)
+                    
+                    if qty > 0 and avg_entry_price > 0:  # Only track long positions
+                        # Create a Trade object for tracking
+                        trade = Trade(
+                            symbol=symbol,
+                            trade_type=TradeType.BUY,
+                            quantity=qty,
+                            price=avg_entry_price,
+                            timestamp=datetime.now(),
+                            order_type=OrderType.MARKET,
+                            notes="Existing position loaded from Alpaca"
+                        )
+                        self.active_positions[symbol] = trade
+                        self.logger.info(f"Loaded existing position: {symbol} - {qty} shares at ${avg_entry_price:.2f}")
+                
+                self.logger.info(f"Loaded {len(self.active_positions)} existing positions from Alpaca")
+            else:
+                self.logger.info("No existing positions found in Alpaca account")
+                
+        except Exception as e:
+            self.logger.error(f"Error loading existing positions: {e}")
 
     def set_callbacks(self, account_callback=None, order_callback=None, position_callback=None):
         """Set callback functions for updates."""
@@ -525,6 +560,7 @@ class EnhancedStrategy:
     def update_positions(self) -> None:
         """Update active positions and pending orders."""
         try:
+            self.logger.info(f"Checking positions - Active positions: {len(self.active_positions)}, Pending orders: {len(self.pending_orders)}")
             # Check pending orders
             for symbol, order_id in list(self.pending_orders.items()):
                 # Validate order_id before making API call
@@ -587,16 +623,19 @@ class EnhancedStrategy:
                     
                     trade = self.active_positions[symbol]
                     
-                    # Check stop loss
+                    # Check stop loss and take profit
                     if trade.trade_type == TradeType.BUY:
                         stop_loss_price = trade.price * (1 - self.stop_loss_pct)
                         take_profit_price = trade.price * (1 + self.take_profit_pct)
+                        profit_pct = ((current_price - trade.price) / trade.price) * 100
+                        
+                        self.logger.info(f"Checking {symbol}: Entry=${trade.price:.2f}, Current=${current_price:.2f}, Profit={profit_pct:.2f}%, Take Profit Threshold={self.take_profit_pct*100:.2f}%")
                         
                         if current_price <= stop_loss_price:
                             self.logger.info(f"Stop loss triggered for {symbol} at ${current_price:.2f}")
                             self.execute_sell_order(symbol, "Stop loss triggered")
                         elif current_price >= take_profit_price:
-                            self.logger.info(f"Take profit triggered for {symbol} at ${current_price:.2f}")
+                            self.logger.info(f"Take profit triggered for {symbol} at ${current_price:.2f} (profit: {profit_pct:.2f}%)")
                             self.execute_sell_order(symbol, "Take profit triggered")
                             
                 except Exception as e:
