@@ -5,6 +5,8 @@ error handling, connection management, and trading functionality.
 """
 
 import logging
+import time
+from collections import deque
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Union
 
@@ -25,6 +27,48 @@ from ..utils.error_handler import (
 )
 
 
+class RateLimiter:
+    """Rate limiter to prevent API rate limit violations."""
+    
+    def __init__(self, max_calls: int = 200, time_window: int = 60):
+        """Initialize rate limiter.
+        
+        Args:
+            max_calls: Maximum number of calls allowed in time window
+            time_window: Time window in seconds
+        """
+        self.max_calls = max_calls
+        self.time_window = time_window
+        self.calls = deque()
+        self.logger = logging.getLogger(__name__)
+    
+    def wait_if_needed(self) -> None:
+        """Wait if rate limit would be exceeded."""
+        now = time.time()
+        
+        # Remove old calls outside the time window
+        while self.calls and self.calls[0] <= now - self.time_window:
+            self.calls.popleft()
+        
+        # Check if we're at the limit
+        if len(self.calls) >= self.max_calls:
+            # Calculate how long to wait
+            oldest_call = self.calls[0]
+            wait_time = self.time_window - (now - oldest_call) + 0.1  # Add small buffer
+            
+            if wait_time > 0:
+                self.logger.warning(f"Rate limit reached. Waiting {wait_time:.2f} seconds...")
+                time.sleep(wait_time)
+                
+                # Clean up old calls after waiting
+                now = time.time()
+                while self.calls and self.calls[0] <= now - self.time_window:
+                    self.calls.popleft()
+        
+        # Record this call
+        self.calls.append(now)
+
+
 class AlpacaClientError(Exception):
     """Custom exception for Alpaca client errors."""
     pass
@@ -41,6 +85,7 @@ class AlpacaClient:
         """
         self.logger = logging.getLogger(__name__)
         self.error_handler = ErrorHandler(self.logger)
+        self.rate_limiter = RateLimiter(max_calls=180, time_window=60)  # Conservative limit
         
         try:
             api_key, secret_key, base_url = settings.get_alpaca_credentials()
@@ -105,6 +150,9 @@ class AlpacaClient:
             if self.error_handler.is_circuit_breaker_open("get_account"):
                 raise APIConnectionError("Circuit breaker is open for account operations")
             
+            # Apply rate limiting
+            self.rate_limiter.wait_if_needed()
+            
             return self.api.get_account()
         except Exception as e:
             self.error_handler.handle_api_error(e, "get_account")
@@ -141,6 +189,9 @@ class AlpacaClient:
             if self.error_handler.is_circuit_breaker_open("get_positions"):
                 raise APIConnectionError("Circuit breaker is open for position operations")
             
+            # Apply rate limiting
+            self.rate_limiter.wait_if_needed()
+            
             return self.api.list_positions()
         except Exception as e:
             self.error_handler.handle_api_error(e, "get_positions")
@@ -159,6 +210,9 @@ class AlpacaClient:
             AlpacaClientError: If API call fails.
         """
         try:
+            # Apply rate limiting
+            self.rate_limiter.wait_if_needed()
+            
             return self.api.get_position(symbol)
         except APIError as e:
             if "position does not exist" in str(e).lower():
@@ -208,6 +262,9 @@ class AlpacaClient:
             if self.error_handler.is_circuit_breaker_open("get_order"):
                 raise APIConnectionError("Circuit breaker is open for order operations")
             
+            # Apply rate limiting
+            self.rate_limiter.wait_if_needed()
+            
             return self.api.get_order(order_id)
         except Exception as e:
             self.error_handler.handle_api_error(e, "get_order")
@@ -256,6 +313,9 @@ class AlpacaClient:
         try:
             if self.error_handler.is_circuit_breaker_open(f"place_order_{symbol}"):
                 raise APIConnectionError(f"Circuit breaker is open for {symbol} orders")
+            
+            # Apply rate limiting before order placement
+            self.rate_limiter.wait_if_needed()
             
             # Validate order parameters
             if side not in ["buy", "sell"]:
@@ -398,6 +458,9 @@ class AlpacaClient:
             if self.error_handler.is_circuit_breaker_open(f"get_bars_{symbol}"):
                 raise APIConnectionError(f"Circuit breaker is open for {symbol} market data")
             
+            # Apply rate limiting
+            self.rate_limiter.wait_if_needed()
+            
             # Set default time range if not provided
             if start is None:
                 start = datetime.now() - timedelta(days=1)
@@ -499,6 +562,9 @@ class AlpacaClient:
             if self.error_handler.is_circuit_breaker_open(f"get_quote_{symbol}"):
                 raise APIConnectionError(f"Circuit breaker is open for {symbol} quotes")
             
+            # Apply rate limiting
+            self.rate_limiter.wait_if_needed()
+            
             # Use IEX feed for free accounts to avoid SIP data subscription issues
             quote = self.api.get_latest_quote(symbol, feed='iex')
             
@@ -562,6 +628,9 @@ class AlpacaClient:
         try:
             if self.error_handler.is_circuit_breaker_open(f"get_trade_{symbol}"):
                 raise APIConnectionError(f"Circuit breaker is open for {symbol} trade data")
+            
+            # Apply rate limiting
+            self.rate_limiter.wait_if_needed()
             
             # Use IEX feed for free accounts to avoid SIP data subscription issues
             trade = self.api.get_latest_trade(symbol, feed='iex')

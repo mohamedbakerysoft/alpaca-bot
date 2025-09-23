@@ -61,9 +61,17 @@ class EnhancedStrategy:
         
         # State tracking
         self.active_positions: Dict[str, Trade] = {}
+        self.recently_removed_positions: Dict[str, float] = {}  # symbol -> timestamp when removed
+        self.removal_cooldown = 300  # 5 minutes cooldown before re-adding removed positions
         self.pending_orders: Dict[str, str] = {}
         self.daily_trades_count = 0
         self.last_reset_date = datetime.now().date()
+        
+        # API call optimization
+        self.last_position_refresh = 0.0  # timestamp of last position refresh
+        self.position_refresh_interval = 30.0  # refresh positions every 30 seconds instead of every update
+        self.last_order_batch_check = 0.0  # timestamp of last batch order check
+        self.order_check_interval = 10.0  # check orders every 10 seconds
         
         # Callbacks
         self.account_update_callback = None
@@ -529,9 +537,11 @@ class EnhancedStrategy:
                 # Handle insufficient quantity and other order errors gracefully
                 error_msg = str(order_error).lower()
                 if 'insufficient qty' in error_msg or 'insufficient quantity' in error_msg:
-                    self.logger.warning(f"Insufficient quantity for {symbol}. Removing from tracking and syncing positions.")
+                    self.logger.warning(f"Insufficient quantity for {symbol}. Removing from tracking and adding to cooldown.")
                     # Remove from tracking since we can't sell it
                     del self.active_positions[symbol]
+                    # Add to recently removed positions with current timestamp
+                    self.recently_removed_positions[symbol] = time.time()
                     # Force a position refresh to sync with Alpaca
                     self._refresh_positions_from_alpaca()
                     return None
@@ -613,8 +623,24 @@ class EnhancedStrategy:
                 if quantity > 0:
                     alpaca_symbols.add(symbol)
                     
-                    # If we're not tracking this position, add it
+                    # If we're not tracking this position, add it (but check cooldown and recent orders first)
                     if symbol not in self.active_positions:
+                        # Check if this position was recently removed due to insufficient quantity
+                        current_time = time.time()
+                        if symbol in self.recently_removed_positions:
+                            removal_time = self.recently_removed_positions[symbol]
+                            if current_time - removal_time < self.removal_cooldown:
+                                self.logger.info(f"Skipping re-add of {symbol} - still in cooldown period ({self.removal_cooldown - (current_time - removal_time):.1f}s remaining)")
+                                continue
+                            else:
+                                # Cooldown expired, remove from recently removed
+                                del self.recently_removed_positions[symbol]
+                        
+                        # Verify no recent sell orders for this symbol before re-adding
+                        if self._has_recent_sell_order(symbol):
+                            self.logger.info(f"Skipping re-add of {symbol} - recent sell order detected")
+                            continue
+                        
                         self.logger.info(f"Adding untracked position from Alpaca: {symbol} ({quantity} shares @ ${entry_price:.2f})")
                         trade = Trade(
                             symbol=symbol,
@@ -656,57 +682,24 @@ class EnhancedStrategy:
     def update_positions(self) -> None:
         """Update active positions and pending orders."""
         try:
-            # Refresh positions from Alpaca every update to ensure we're monitoring everything
-            self._refresh_positions_from_alpaca()
+            current_time = time.time()
+            
+            # Only refresh positions from Alpaca if enough time has passed
+            if current_time - self.last_position_refresh >= self.position_refresh_interval:
+                self._refresh_positions_from_alpaca()
+                self.last_position_refresh = current_time
+                self.logger.debug(f"Position refresh completed (interval: {self.position_refresh_interval}s)")
+            
+            # Clean up expired recently removed positions
+            self._cleanup_recently_removed_positions()
             
             self.logger.info(f"Checking positions - Active positions: {len(self.active_positions)}, Pending orders: {len(self.pending_orders)}")
-            # Check pending orders
-            for symbol, order_id in list(self.pending_orders.items()):
-                # Validate order_id before making API call
-                if not order_id or not isinstance(order_id, str) or order_id.strip() == "":
-                    self.logger.warning(f"Invalid order_id for {symbol}: {order_id}. Removing from pending orders.")
-                    del self.pending_orders[symbol]
-                    continue
-                    
-                try:
-                    order = self.alpaca_client.get_order(order_id)
-                    if not order:
-                        continue
-                    
-                    if order.status == 'filled':
-                        # Update position status
-                        if symbol in self.active_positions:
-                            self.active_positions[symbol].status = TradeStatus.FILLED
-                            self.logger.info(f"Order filled for {symbol}: {order.side} {order.qty} shares at ${order.filled_avg_price}")
-                        
-                        # Trigger callbacks
-                        if self.account_update_callback:
-                            self.account_update_callback()
-                        if self.order_update_callback:
-                            self.order_update_callback()
-                        if self.position_update_callback:
-                            self.position_update_callback()
-                            
-                        del self.pending_orders[symbol]
-                        
-                    elif order.status in ['cancelled', 'rejected', 'expired']:
-                        # Handle cancelled/rejected orders
-                        if symbol in self.active_positions:
-                            self.logger.info(f"Order {order.status} for {symbol}: {order.side} {order.qty} shares")
-                            # Remove from active positions if order was cancelled
-                            del self.active_positions[symbol]
-                        
-                        # Trigger callbacks
-                        if self.order_update_callback:
-                            self.order_update_callback()
-                        if self.position_update_callback:
-                            self.position_update_callback()
-                            
-                        del self.pending_orders[symbol]
-                        
-                except Exception as e:
-                    self.logger.error(f"Error checking order {order_id} for {symbol}: {e}")
-                    continue
+            
+            # Check pending orders using batch API call (only if enough time has passed)
+            if current_time - self.last_order_batch_check >= self.order_check_interval:
+                self._batch_check_pending_orders()
+                self.last_order_batch_check = current_time
+                self.logger.debug(f"Batch order check completed (interval: {self.order_check_interval}s)")
             
             # Check exit conditions for active positions
             for symbol in list(self.active_positions.keys()):
@@ -743,6 +736,121 @@ class EnhancedStrategy:
                     
         except Exception as e:
             self.logger.error(f"Error in update_positions: {e}")
+
+    def _cleanup_recently_removed_positions(self) -> None:
+        """Clean up expired entries from recently_removed_positions."""
+        try:
+            current_time = time.time()
+            expired_symbols = []
+            
+            for symbol, removal_time in self.recently_removed_positions.items():
+                if current_time - removal_time >= self.removal_cooldown:
+                    expired_symbols.append(symbol)
+            
+            for symbol in expired_symbols:
+                del self.recently_removed_positions[symbol]
+                self.logger.debug(f"Removed {symbol} from recently_removed_positions (cooldown expired)")
+                
+        except Exception as e:
+            self.logger.error(f"Error cleaning up recently_removed_positions: {e}")
+
+    def _has_recent_sell_order(self, symbol: str) -> bool:
+        """Check if there's a recent sell order for the given symbol."""
+        try:
+            # Get recent orders for this symbol (last 24 hours)
+            from datetime import datetime, timedelta
+            since = datetime.now() - timedelta(hours=24)
+            
+            orders = self.alpaca_client.get_orders(
+                status='all',
+                limit=50,
+                after=since.isoformat()
+            )
+            
+            if not orders:
+                return False
+            
+            # Check for recent sell orders for this symbol
+            for order in orders:
+                if (order.symbol == symbol and 
+                    order.side == 'sell' and 
+                    order.status in ['filled', 'partially_filled', 'new', 'pending_new']):
+                    
+                    # Check if the order is recent (within last 5 minutes)
+                    order_time = datetime.fromisoformat(order.created_at.replace('Z', '+00:00'))
+                    time_diff = datetime.now(order_time.tzinfo) - order_time
+                    
+                    if time_diff.total_seconds() < 300:  # 5 minutes
+                        self.logger.info(f"Found recent sell order for {symbol}: {order.id} ({order.status})")
+                        return True
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error checking recent sell orders for {symbol}: {e}")
+            return False  # If we can't check, allow the position to be added
+
+    def _batch_check_pending_orders(self) -> None:
+        """Check all pending orders in a single batch API call."""
+        if not self.pending_orders:
+            return
+            
+        try:
+            # Get all orders in a single API call
+            all_orders = self.alpaca_client.get_orders(status='all', limit=100)
+            if not all_orders:
+                return
+                
+            # Create a lookup dictionary for faster access
+            order_lookup = {order.id: order for order in all_orders}
+            
+            # Check each pending order
+            for symbol, order_id in list(self.pending_orders.items()):
+                # Validate order_id
+                if not order_id or not isinstance(order_id, str) or order_id.strip() == "":
+                    self.logger.warning(f"Invalid order_id for {symbol}: {order_id}. Removing from pending orders.")
+                    del self.pending_orders[symbol]
+                    continue
+                
+                # Look up the order in our batch result
+                order = order_lookup.get(order_id)
+                if not order:
+                    self.logger.warning(f"Order {order_id} for {symbol} not found in batch results")
+                    continue
+                
+                if order.status == 'filled':
+                    # Update position status
+                    if symbol in self.active_positions:
+                        self.active_positions[symbol].status = TradeStatus.FILLED
+                        self.logger.info(f"Order filled for {symbol}: {order.side} {order.qty} shares at ${order.filled_avg_price}")
+                    
+                    # Trigger callbacks
+                    if self.account_update_callback:
+                        self.account_update_callback()
+                    if self.order_update_callback:
+                        self.order_update_callback()
+                    if self.position_update_callback:
+                        self.position_update_callback()
+                        
+                    del self.pending_orders[symbol]
+                    
+                elif order.status in ['cancelled', 'rejected', 'expired']:
+                    # Handle cancelled/rejected orders
+                    if symbol in self.active_positions:
+                        self.logger.info(f"Order {order.status} for {symbol}: {order.side} {order.qty} shares")
+                        # Remove from active positions if order was cancelled
+                        del self.active_positions[symbol]
+                    
+                    # Trigger callbacks
+                    if self.order_update_callback:
+                        self.order_update_callback()
+                    if self.position_update_callback:
+                        self.position_update_callback()
+                        
+                    del self.pending_orders[symbol]
+                    
+        except Exception as e:
+            self.logger.error(f"Error in batch order checking: {e}")
 
 
 # Keep backward compatibility
