@@ -45,7 +45,7 @@ class EnhancedStrategy:
         # Enhanced strategy parameters - Using unified settings
         self.position_size_pct = getattr(self.settings, 'max_position_percentage', 0.03)  # % of portfolio per trade
         self.stop_loss_pct = getattr(self.settings, 'stop_loss_percentage', 0.015)     # Stop loss from settings
-        self.take_profit_pct = getattr(self.settings, 'take_profit_percentage', 0.03)    # Take profit from settings
+        self.take_profit_pct = getattr(self.settings, 'take_profit_percentage', 0.001)    # Take profit from settings - 0.1%
         self.max_daily_trades = getattr(self.settings, 'max_daily_trades', 8)      # Maximum trades per day from settings
         self.min_volume_threshold = 50000  # Reduced from 100000 to 50000 - Minimum daily volume
         
