@@ -795,7 +795,7 @@ class EnhancedStrategy:
             orders = self.alpaca_client.get_orders(
                 status='all',
                 limit=50,
-                after=since.isoformat()
+                after=since.strftime('%Y-%m-%dT%H:%M:%SZ')
             )
             
             if not orders:

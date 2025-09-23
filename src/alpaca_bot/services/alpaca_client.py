@@ -222,12 +222,13 @@ class AlpacaClient:
     
     @retry_on_error(max_retries=3, delay=1.0)
     @circuit_breaker(failure_threshold=5, timeout=300)
-    def get_orders(self, status: str = "all", limit: int = 50) -> List[Order]:
+    def get_orders(self, status: str = "all", limit: int = 50, after: Optional[str] = None) -> List[Order]:
         """Get orders with optional status filter.
         
         Args:
             status: Order status filter ("open", "closed", "all").
             limit: Maximum number of orders to return.
+            after: Only include orders submitted after this timestamp (ISO format).
             
         Returns:
             List[Order]: List of orders.
@@ -239,7 +240,12 @@ class AlpacaClient:
             if self.error_handler.is_circuit_breaker_open("get_orders"):
                 raise APIConnectionError("Circuit breaker is open for order operations")
             
-            return self.api.list_orders(status=status, limit=limit)
+            # Build parameters for the API call
+            params = {"status": status, "limit": limit}
+            if after is not None:
+                params["after"] = after
+            
+            return self.api.list_orders(**params)
         except Exception as e:
             self.error_handler.handle_api_error(e, "get_orders")
             raise
