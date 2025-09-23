@@ -259,8 +259,8 @@ class ExtendedHoursMonitor:
         """
         base_limits = {
             'max_position_size': getattr(settings, 'extended_hours_max_position_size', 1000),
-            'stop_loss_pct': getattr(settings, 'extended_hours_stop_loss_percentage', 0.02),
-            'take_profit_pct': getattr(settings, 'extended_hours_take_profit_percentage', 0.03)
+            'stop_loss_pct': getattr(settings, 'stop_loss_percentage', 0.02),
+            'take_profit_pct': getattr(settings, 'take_profit_percentage', 0.001)
         }
         
         if symbol not in self.metrics_history or not self.metrics_history[symbol]:

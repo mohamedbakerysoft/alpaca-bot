@@ -1157,27 +1157,8 @@ class ScalpingStrategy:
                 if current_price <= trailing_stop_price:
                     return ("SELL", f"Trailing stop triggered at ${trailing_stop_price:.2f} (High: ${highest_price:.2f})", 1.0)
         else:
-            # Apply extended hours stop loss adjustments
-            stop_loss_threshold = self.stop_loss_pct
-            try:
-                from ..config.settings import settings
-                from ..utils.market_utils import MarketHours
-                
-                if getattr(settings, 'extended_hours_enabled', False):
-                    market_hours = MarketHours()
-                    if market_hours.is_extended_hours():
-                        # Use extended hours stop loss settings if available
-                        extended_stop_loss = getattr(settings, 'extended_hours_stop_loss_percentage', None)
-                        if extended_stop_loss is not None:
-                            stop_loss_threshold = extended_stop_loss
-                        else:
-                            # More conservative stop loss during extended hours
-                            stop_loss_threshold *= 0.7
-                            
-            except Exception as e:
-                self.logger.debug(f"Error applying extended hours stop loss adjustment: {e}")
-            
-            if pnl_pct <= -stop_loss_threshold:
+            # Apply unified stop loss for all trading hours
+            if pnl_pct <= -self.stop_loss_pct:
                 return ("SELL", f"Stop loss triggered ({pnl_pct:.2%})", 1.0)
         
         # Dynamic take profit based on volatility and momentum
@@ -1386,24 +1367,7 @@ class ScalpingStrategy:
         """
         base_take_profit = self.take_profit_pct
         
-        # Apply extended hours adjustments
-        try:
-            from ..config.settings import settings
-            from ..utils.market_utils import MarketHours
-            
-            if getattr(settings, 'extended_hours_enabled', False):
-                market_hours = MarketHours()
-                if market_hours.is_extended_hours():
-                    # Use extended hours take profit settings if available
-                    extended_take_profit = getattr(settings, 'extended_hours_take_profit_percentage', None)
-                    if extended_take_profit is not None:
-                        base_take_profit = extended_take_profit
-                    else:
-                        # More conservative take profit during extended hours
-                        base_take_profit *= 0.8
-                        
-        except Exception as e:
-            self.logger.debug(f"Error applying extended hours take profit adjustment: {e}")
+        # Note: Using unified take profit percentage for all trading hours
         
         # Adjust based on RSI momentum
         if stock_data.technical_indicators and stock_data.technical_indicators.rsi:

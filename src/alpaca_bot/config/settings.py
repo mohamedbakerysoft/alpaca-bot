@@ -80,14 +80,14 @@ class Settings:
         )
         self.stop_loss_percentage: float = config(
             "STOP_LOSS_PERCENTAGE",
-            default=0.025,  # Increased from 0.01 (1%) to 0.025 (2.5%) for better protection
+            default=0.02,  # 2% stop loss for unified risk management
             cast=float
         )
         
         # Additional risk management parameters
         self.take_profit_percentage: float = config(
             "TAKE_PROFIT_PERCENTAGE",
-            default=0.05,  # 5% take profit for better risk/reward ratio (2:1)
+            default=0.001,  # 0.10% take profit for unified risk management
             cast=float
         )
         self.max_daily_loss_percentage: float = config(
@@ -173,16 +173,6 @@ class Settings:
         self.extended_hours_max_position_size: float = config(
             "EXTENDED_HOURS_MAX_POSITION_SIZE",
             default=250.0,  # Reduced position size for extended hours
-            cast=float
-        )
-        self.extended_hours_stop_loss_percentage: float = config(
-            "EXTENDED_HOURS_STOP_LOSS_PERCENTAGE",
-            default=0.015,  # Tighter stop loss (1.5%) for extended hours
-            cast=float
-        )
-        self.extended_hours_take_profit_percentage: float = config(
-            "EXTENDED_HOURS_TAKE_PROFIT_PERCENTAGE",
-            default=0.03,  # Lower take profit (3%) for extended hours
             cast=float
         )
         

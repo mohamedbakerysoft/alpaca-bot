@@ -113,8 +113,6 @@ class ConfigPanel:
             'extended_hours_end_hour': tk.IntVar(value=self.settings.extended_hours_end_hour),
             'extended_hours_end_minute': tk.IntVar(value=self.settings.extended_hours_end_minute),
             'extended_hours_max_position_size': tk.DoubleVar(value=self.settings.extended_hours_max_position_size),
-            'extended_hours_stop_loss_percentage': tk.DoubleVar(value=self.settings.extended_hours_stop_loss_percentage * 100),
-            'extended_hours_take_profit_percentage': tk.DoubleVar(value=self.settings.extended_hours_take_profit_percentage * 100),
             
             # Data settings
             'data_update_interval': tk.IntVar(value=5),
@@ -289,12 +287,6 @@ class ConfigPanel:
         
         ttk.Label(ext_risk_frame, text="Max Position Size:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
         ttk.Entry(ext_risk_frame, textvariable=self.config_vars['extended_hours_max_position_size'], width=10).grid(row=0, column=1, sticky=tk.W, padx=5, pady=2)
-        
-        ttk.Label(ext_risk_frame, text="Stop Loss %:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=2)
-        ttk.Entry(ext_risk_frame, textvariable=self.config_vars['extended_hours_stop_loss_percentage'], width=10).grid(row=1, column=1, sticky=tk.W, padx=5, pady=2)
-        
-        ttk.Label(ext_risk_frame, text="Take Profit %:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
-        ttk.Entry(ext_risk_frame, textvariable=self.config_vars['extended_hours_take_profit_percentage'], width=10).grid(row=2, column=1, sticky=tk.W, padx=5, pady=2)
         
         # Information label
         info_label = ttk.Label(
@@ -567,8 +559,6 @@ class ConfigPanel:
                 'extended_hours_end_hour': 'extended_hours_end_hour',
                 'extended_hours_end_minute': 'extended_hours_end_minute',
                 'extended_hours_max_position_size': 'extended_hours_max_position_size',
-                'extended_hours_stop_loss_percentage': 'extended_hours_stop_loss_percentage',
-                'extended_hours_take_profit_percentage': 'extended_hours_take_profit_percentage',
                 
                 # Data settings
                 'data_update_interval': 'DATA_UPDATE_INTERVAL',
@@ -645,8 +635,6 @@ class ConfigPanel:
                 'extended_hours_end_hour': 'extended_hours_end_hour',
                 'extended_hours_end_minute': 'extended_hours_end_minute',
                 'extended_hours_max_position_size': 'extended_hours_max_position_size',
-                'extended_hours_stop_loss_percentage': 'extended_hours_stop_loss_percentage',
-                'extended_hours_take_profit_percentage': 'extended_hours_take_profit_percentage',
                 
                 # Data settings
                 'DATA_UPDATE_INTERVAL': 'data_update_interval',
