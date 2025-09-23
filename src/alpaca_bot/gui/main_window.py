@@ -807,6 +807,10 @@ class MainWindow:
     def _update_orders_display(self) -> None:
         """Update the orders display with enhanced information."""
         try:
+            # Check if orders_tree exists (lazy loading)
+            if not hasattr(self, 'orders_tree'):
+                return
+                
             # Clear existing items
             for item in self.orders_tree.get_children():
                 self.orders_tree.delete(item)
