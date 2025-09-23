@@ -288,7 +288,8 @@ class AlpacaClient:
         stop_price: Optional[float] = None,
         trail_price: Optional[float] = None,
         trail_percent: Optional[float] = None,
-        notional: Optional[float] = None
+        notional: Optional[float] = None,
+        extended_hours: Optional[bool] = None
     ) -> Order:
         """Place a trading order.
         
@@ -362,6 +363,42 @@ class AlpacaClient:
                 order_data["trail_price"] = trail_price
             if trail_percent is not None:
                 order_data["trail_percent"] = trail_percent
+            
+            # Add extended hours support
+            if extended_hours is None:
+                # Auto-detect based on settings and market hours
+                extended_hours = getattr(settings, 'extended_hours_enabled', False)
+            
+            if extended_hours:
+                order_data["extended_hours"] = True
+                # For extended hours, Alpaca requires DAY limit orders
+                order_data["time_in_force"] = "day"
+                
+                # Convert market orders to limit orders for extended hours
+                if order_type == "market":
+                    order_data["type"] = "limit"
+                    
+                    # Get current price for limit order
+                    try:
+                        if side == "buy":
+                            # For buy orders, use ask price or add small buffer to current price
+                            current_price = self.get_current_price(symbol)
+                            if current_price:
+                                limit_price = current_price * 1.001  # Add 0.1% buffer
+                                order_data["limit_price"] = round(limit_price, 2)
+                                self.logger.info(f"Extended hours: Converting market buy to limit at ${limit_price:.2f}")
+                        else:
+                            # For sell orders, use bid price or subtract small buffer from current price
+                            current_price = self.get_current_price(symbol)
+                            if current_price:
+                                limit_price = current_price * 0.999  # Subtract 0.1% buffer
+                                order_data["limit_price"] = round(limit_price, 2)
+                                self.logger.info(f"Extended hours: Converting market sell to limit at ${limit_price:.2f}")
+                    except Exception as e:
+                        self.logger.error(f"Failed to get current price for extended hours limit order: {e}")
+                        raise Exception(f"Cannot place extended hours order without current price: {e}")
+                
+                self.logger.info(f"Using DAY limit order for extended hours trading")
             
             # Place order
             order = self.api.submit_order(**order_data)
@@ -652,6 +689,38 @@ class AlpacaClient:
         except Exception as e:
             self.error_handler.handle_market_data_error(e, symbol)
             raise
+
+    def get_current_price(self, symbol: str) -> Optional[float]:
+        """Get the current price for a symbol.
+        
+        Args:
+            symbol: Stock symbol.
+            
+        Returns:
+            Optional[float]: Current price or None if unavailable.
+        """
+        try:
+            # Try to get the latest trade price first
+            trade_data = self.get_latest_trade(symbol)
+            return trade_data['price']
+        except Exception as e:
+            self.logger.warning(f"Failed to get current price for {symbol}: {e}")
+            try:
+                # Fallback to quote data
+                quote_data = self.get_latest_quote(symbol)
+                # Use mid-price between bid and ask
+                bid = quote_data.get('bid', 0)
+                ask = quote_data.get('ask', 0)
+                if bid > 0 and ask > 0:
+                    return (bid + ask) / 2
+                elif bid > 0:
+                    return bid
+                elif ask > 0:
+                    return ask
+            except Exception as quote_error:
+                self.logger.error(f"Failed to get quote for {symbol}: {quote_error}")
+            
+            return None
     
     @retry_on_error(max_retries=3, delay=1.0)
     @circuit_breaker(failure_threshold=5, timeout=300)

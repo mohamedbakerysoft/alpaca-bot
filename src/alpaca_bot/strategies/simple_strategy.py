@@ -571,14 +571,15 @@ class EnhancedStrategy:
             
             current_price = float(quote['bid'])
             
-            # Place market sell order
+            # Place market sell order with extended hours support
             try:
                 order = self.alpaca_client.place_order(
                     symbol=symbol,
                     qty=quantity,
                     side='sell',
                     order_type='market',
-                    time_in_force='day'
+                    time_in_force='gtc',  # Use GTC for better execution
+                    extended_hours=True   # Enable extended hours trading
                 )
             except Exception as order_error:
                 # Handle insufficient quantity and other order errors gracefully

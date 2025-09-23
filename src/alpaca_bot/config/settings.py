@@ -145,7 +145,7 @@ class Settings:
         # Extended Hours Trading (4 AM - 8 PM ET)
         self.extended_hours_enabled: bool = config(
             "EXTENDED_HOURS_ENABLED",
-            default=False,
+            default=True,
             cast=bool
         )
         self.extended_hours_start_hour: int = config(
