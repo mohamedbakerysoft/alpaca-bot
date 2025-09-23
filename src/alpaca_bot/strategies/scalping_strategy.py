@@ -28,6 +28,8 @@ from ..utils.technical_analysis import (
     calculate_macd
 )
 from ..utils.logging_utils import trade_logger
+from ..utils.extended_hours_monitor import ExtendedHoursMonitor
+from ..utils.market_utils import MarketHours
 from ..utils.error_handler import (
     ErrorHandler, MarketDataError, OrderExecutionError,
     safe_execute
@@ -222,6 +224,9 @@ class ScalpingStrategy:
         
         # Dynamic parameter tracking
         self._last_portfolio_value = None
+        
+        # Initialize extended hours monitor
+        self.extended_hours_monitor = ExtendedHoursMonitor()
         
         # Recover existing positions and orders from Alpaca API
         self._recover_existing_state()
@@ -550,6 +555,27 @@ class ScalpingStrategy:
                 timestamp=datetime.now()  # Use current time since IEX doesn't provide timestamp in the dict
             )
             
+            # Update extended hours monitor with current data
+            current_price = current_quote.ask if current_quote.ask else df['close'].iloc[-1]
+            current_volume = df['volume'].iloc[-1] if 'volume' in df.columns else 0
+            
+            # Calculate volatility (simplified using recent price changes)
+            if len(df) >= 20:
+                recent_returns = df['close'].pct_change().tail(20)
+                volatility = recent_returns.std() * (252 ** 0.5)  # Annualized volatility
+            else:
+                volatility = 0.0
+            
+            # Update extended hours monitor
+            self.extended_hours_monitor.update_metrics(
+                symbol=symbol,
+                current_price=current_price,
+                volume=int(current_volume),
+                bid=current_quote.bid,
+                ask=current_quote.ask,
+                volatility=volatility
+            )
+            
             # Convert DataFrame to StockBar objects for current_bars
             current_bars = []
             if len(df) > 0:
@@ -763,6 +789,13 @@ class ScalpingStrategy:
             if not can_trade:
                 self.logger.warning(f"{symbol}: Cannot execute buy order - {limit_reason}")
                 return None
+            
+            # Check extended hours trading safety
+            if settings.extended_hours_enabled and MarketHours.is_extended_hours():
+                is_safe, safety_reason = self.extended_hours_monitor.is_trading_safe(symbol)
+                if not is_safe:
+                    self.logger.warning(f"{symbol}: Extended hours trading not safe - {safety_reason}")
+                    return None
             
             # Get account information first
             account = self.alpaca_client.get_account()
@@ -1124,7 +1157,27 @@ class ScalpingStrategy:
                 if current_price <= trailing_stop_price:
                     return ("SELL", f"Trailing stop triggered at ${trailing_stop_price:.2f} (High: ${highest_price:.2f})", 1.0)
         else:
-            if pnl_pct <= -self.stop_loss_pct:
+            # Apply extended hours stop loss adjustments
+            stop_loss_threshold = self.stop_loss_pct
+            try:
+                from ..config.settings import settings
+                from ..utils.market_utils import MarketHours
+                
+                if getattr(settings, 'extended_hours_enabled', False):
+                    market_hours = MarketHours()
+                    if market_hours.is_extended_hours():
+                        # Use extended hours stop loss settings if available
+                        extended_stop_loss = getattr(settings, 'extended_hours_stop_loss_percentage', None)
+                        if extended_stop_loss is not None:
+                            stop_loss_threshold = extended_stop_loss
+                        else:
+                            # More conservative stop loss during extended hours
+                            stop_loss_threshold *= 0.7
+                            
+            except Exception as e:
+                self.logger.debug(f"Error applying extended hours stop loss adjustment: {e}")
+            
+            if pnl_pct <= -stop_loss_threshold:
                 return ("SELL", f"Stop loss triggered ({pnl_pct:.2%})", 1.0)
         
         # Dynamic take profit based on volatility and momentum
@@ -1333,6 +1386,25 @@ class ScalpingStrategy:
         """
         base_take_profit = self.take_profit_pct
         
+        # Apply extended hours adjustments
+        try:
+            from ..config.settings import settings
+            from ..utils.market_utils import MarketHours
+            
+            if getattr(settings, 'extended_hours_enabled', False):
+                market_hours = MarketHours()
+                if market_hours.is_extended_hours():
+                    # Use extended hours take profit settings if available
+                    extended_take_profit = getattr(settings, 'extended_hours_take_profit_percentage', None)
+                    if extended_take_profit is not None:
+                        base_take_profit = extended_take_profit
+                    else:
+                        # More conservative take profit during extended hours
+                        base_take_profit *= 0.8
+                        
+        except Exception as e:
+            self.logger.debug(f"Error applying extended hours take profit adjustment: {e}")
+        
         # Adjust based on RSI momentum
         if stock_data.technical_indicators and stock_data.technical_indicators.rsi:
             rsi = stock_data.technical_indicators.rsi
@@ -1538,7 +1610,7 @@ class ScalpingStrategy:
     def _is_optimal_trading_time(self) -> bool:
         """Check if current time is optimal for trading.
         
-        Avoids first and last 30 minutes of trading day.
+        Supports both regular and extended hours trading.
         
         Returns:
             True if optimal time, False otherwise.
@@ -1546,17 +1618,33 @@ class ScalpingStrategy:
         try:
             from datetime import datetime, time
             import pytz
+            from ..utils.market_utils import MarketHours
+            from ..config.settings import settings
             
             # Get current Eastern Time
             et = pytz.timezone('US/Eastern')
             now = datetime.now(et).time()
             
-            # Market hours: 9:30 AM - 4:00 PM ET
-            # Optimal hours: 10:00 AM - 3:30 PM ET (avoid first/last 30 min)
-            optimal_start = time(10, 0)  # 10:00 AM
-            optimal_end = time(15, 30)   # 3:30 PM
-            
-            return optimal_start <= now <= optimal_end
+            # Check if extended hours is enabled
+            if getattr(settings, 'extended_hours_enabled', False):
+                # Extended hours: 4:00 AM - 8:00 PM ET
+                # Optimal extended hours: 4:30 AM - 7:30 PM ET (avoid first/last 30 min)
+                optimal_start = time(4, 30)   # 4:30 AM
+                optimal_end = time(19, 30)    # 7:30 PM
+                
+                # Check if we're in extended hours
+                market_hours = MarketHours()
+                if market_hours.is_market_open(extended_hours_enabled=True):
+                    return optimal_start <= now <= optimal_end
+                else:
+                    return False
+            else:
+                # Regular market hours: 9:30 AM - 4:00 PM ET
+                # Optimal hours: 10:00 AM - 3:30 PM ET (avoid first/last 30 min)
+                optimal_start = time(10, 0)  # 10:00 AM
+                optimal_end = time(15, 30)   # 3:30 PM
+                
+                return optimal_start <= now <= optimal_end
             
         except Exception as e:
             self.logger.debug(f"Error checking trading time: {e}")
@@ -1627,13 +1715,34 @@ class ScalpingStrategy:
         # Trading mode adjustment
         mode_multiplier = 1.3 if self.trading_mode == TradingMode.AGGRESSIVE else 1.0
         
+        # Extended hours adjustment
+        extended_hours_multiplier = 1.0
+        try:
+            from ..config.settings import settings
+            from ..utils.market_utils import MarketHours
+            
+            if getattr(settings, 'extended_hours_enabled', False):
+                market_hours = MarketHours()
+                if market_hours.is_extended_hours():
+                    # Reduce position size during extended hours due to lower liquidity
+                    extended_hours_multiplier = 0.6
+                    
+                    # Apply extended hours max position size limit
+                    extended_max_size = getattr(settings, 'extended_hours_max_position_size', base_position_size * 0.5)
+                    if base_position_size > extended_max_size:
+                        base_position_size = extended_max_size
+                        
+        except Exception as e:
+            self.logger.debug(f"Error applying extended hours adjustment: {e}")
+        
         # Calculate final position size
         dynamic_size = (base_position_size * 
                        volatility_multiplier * 
                        account_multiplier * 
                        rsi_multiplier * 
                        price_multiplier * 
-                       mode_multiplier)
+                       mode_multiplier * 
+                       extended_hours_multiplier)
         
         # Ensure reasonable bounds (between 10% and 200% of base size)
         min_size = base_position_size * 0.1

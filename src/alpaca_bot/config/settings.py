@@ -142,6 +142,50 @@ class Settings:
             cast=bool
         )
         
+        # Extended Hours Trading (4 AM - 8 PM ET)
+        self.extended_hours_enabled: bool = config(
+            "EXTENDED_HOURS_ENABLED",
+            default=False,
+            cast=bool
+        )
+        self.extended_hours_start_hour: int = config(
+            "EXTENDED_HOURS_START_HOUR",
+            default=4,  # 4 AM ET
+            cast=int
+        )
+        self.extended_hours_start_minute: int = config(
+            "EXTENDED_HOURS_START_MINUTE",
+            default=0,
+            cast=int
+        )
+        self.extended_hours_end_hour: int = config(
+            "EXTENDED_HOURS_END_HOUR",
+            default=20,  # 8 PM ET
+            cast=int
+        )
+        self.extended_hours_end_minute: int = config(
+            "EXTENDED_HOURS_END_MINUTE",
+            default=0,
+            cast=int
+        )
+        
+        # Extended Hours Risk Management
+        self.extended_hours_max_position_size: float = config(
+            "EXTENDED_HOURS_MAX_POSITION_SIZE",
+            default=250.0,  # Reduced position size for extended hours
+            cast=float
+        )
+        self.extended_hours_stop_loss_percentage: float = config(
+            "EXTENDED_HOURS_STOP_LOSS_PERCENTAGE",
+            default=0.015,  # Tighter stop loss (1.5%) for extended hours
+            cast=float
+        )
+        self.extended_hours_take_profit_percentage: float = config(
+            "EXTENDED_HOURS_TAKE_PROFIT_PERCENTAGE",
+            default=0.03,  # Lower take profit (3%) for extended hours
+            cast=float
+        )
+        
         # Portfolio Management
         self.custom_portfolio_value_enabled: bool = config(
             "CUSTOM_PORTFOLIO_VALUE_ENABLED",

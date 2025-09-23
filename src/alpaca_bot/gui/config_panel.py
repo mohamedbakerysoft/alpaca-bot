@@ -106,6 +106,16 @@ class ConfigPanel:
             'trading_end_hour': tk.IntVar(value=15),
             'trading_end_minute': tk.IntVar(value=30),
             
+            # Extended Hours Trading
+            'extended_hours_enabled': tk.BooleanVar(value=self.settings.extended_hours_enabled),
+            'extended_hours_start_hour': tk.IntVar(value=self.settings.extended_hours_start_hour),
+            'extended_hours_start_minute': tk.IntVar(value=self.settings.extended_hours_start_minute),
+            'extended_hours_end_hour': tk.IntVar(value=self.settings.extended_hours_end_hour),
+            'extended_hours_end_minute': tk.IntVar(value=self.settings.extended_hours_end_minute),
+            'extended_hours_max_position_size': tk.DoubleVar(value=self.settings.extended_hours_max_position_size),
+            'extended_hours_stop_loss_percentage': tk.DoubleVar(value=self.settings.extended_hours_stop_loss_percentage * 100),
+            'extended_hours_take_profit_percentage': tk.DoubleVar(value=self.settings.extended_hours_take_profit_percentage * 100),
+            
             # Data settings
             'data_update_interval': tk.IntVar(value=5),
             'chart_timeframe': tk.StringVar(value='1Min'),
@@ -126,6 +136,11 @@ class ConfigPanel:
             # Create notebook for different configuration sections
             self.notebook = ttk.Notebook(self.frame)
             self.notebook.pack(fill=tk.BOTH, expand=True)
+        
+        # Create tabs
+        self._create_trading_tab()
+        self._create_risk_management_tab()
+        self._create_extended_hours_tab()
         
         # Control buttons (only for standalone mode)
         if not self.is_notebook_parent:
@@ -182,6 +197,113 @@ class ConfigPanel:
             text="Import Config",
             command=self._import_config
         ).pack(side=tk.LEFT, padx=5)
+    
+    def _create_trading_tab(self) -> None:
+        """Create trading settings tab."""
+        trading_frame = ttk.Frame(self.notebook)
+        self.notebook.add(trading_frame, text="Trading")
+        
+        # Trading hours section
+        hours_frame = ttk.LabelFrame(trading_frame, text="Trading Hours")
+        hours_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # Start time
+        ttk.Label(hours_frame, text="Start Time:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
+        start_frame = ttk.Frame(hours_frame)
+        start_frame.grid(row=0, column=1, sticky=tk.W, padx=5, pady=2)
+        
+        ttk.Spinbox(start_frame, from_=0, to=23, width=5, textvariable=self.config_vars['trading_start_hour']).pack(side=tk.LEFT)
+        ttk.Label(start_frame, text=":").pack(side=tk.LEFT, padx=2)
+        ttk.Spinbox(start_frame, from_=0, to=59, width=5, textvariable=self.config_vars['trading_start_minute']).pack(side=tk.LEFT)
+        
+        # End time
+        ttk.Label(hours_frame, text="End Time:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=2)
+        end_frame = ttk.Frame(hours_frame)
+        end_frame.grid(row=1, column=1, sticky=tk.W, padx=5, pady=2)
+        
+        ttk.Spinbox(end_frame, from_=0, to=23, width=5, textvariable=self.config_vars['trading_end_hour']).pack(side=tk.LEFT)
+        ttk.Label(end_frame, text=":").pack(side=tk.LEFT, padx=2)
+        ttk.Spinbox(end_frame, from_=0, to=59, width=5, textvariable=self.config_vars['trading_end_minute']).pack(side=tk.LEFT)
+    
+    def _create_risk_management_tab(self) -> None:
+        """Create risk management settings tab."""
+        risk_frame = ttk.Frame(self.notebook)
+        self.notebook.add(risk_frame, text="Risk Management")
+        
+        # Risk parameters
+        risk_params_frame = ttk.LabelFrame(risk_frame, text="Risk Parameters")
+        risk_params_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        ttk.Label(risk_params_frame, text="Stop Loss %:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
+        ttk.Entry(risk_params_frame, textvariable=self.config_vars['stop_loss_percent'], width=10).grid(row=0, column=1, sticky=tk.W, padx=5, pady=2)
+        
+        ttk.Label(risk_params_frame, text="Take Profit %:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=2)
+        ttk.Entry(risk_params_frame, textvariable=self.config_vars['take_profit_percent'], width=10).grid(row=1, column=1, sticky=tk.W, padx=5, pady=2)
+        
+        ttk.Label(risk_params_frame, text="Max Daily Loss:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
+        ttk.Entry(risk_params_frame, textvariable=self.config_vars['max_daily_loss'], width=10).grid(row=2, column=1, sticky=tk.W, padx=5, pady=2)
+        
+        ttk.Label(risk_params_frame, text="Max Daily Trades:").grid(row=3, column=0, sticky=tk.W, padx=5, pady=2)
+        ttk.Entry(risk_params_frame, textvariable=self.config_vars['max_daily_trades'], width=10).grid(row=3, column=1, sticky=tk.W, padx=5, pady=2)
+    
+    def _create_extended_hours_tab(self) -> None:
+        """Create extended hours trading tab."""
+        extended_frame = ttk.Frame(self.notebook)
+        self.notebook.add(extended_frame, text="Extended Hours")
+        
+        # Enable extended hours
+        enable_frame = ttk.LabelFrame(extended_frame, text="Extended Hours Settings")
+        enable_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        ttk.Checkbutton(
+            enable_frame, 
+            text="Enable Extended Hours Trading (4 AM - 8 PM ET)",
+            variable=self.config_vars['extended_hours_enabled']
+        ).pack(anchor=tk.W, padx=5, pady=5)
+        
+        # Extended hours time settings
+        time_frame = ttk.LabelFrame(extended_frame, text="Extended Trading Hours")
+        time_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # Start time
+        ttk.Label(time_frame, text="Start Time:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
+        ext_start_frame = ttk.Frame(time_frame)
+        ext_start_frame.grid(row=0, column=1, sticky=tk.W, padx=5, pady=2)
+        
+        ttk.Spinbox(ext_start_frame, from_=0, to=23, width=5, textvariable=self.config_vars['extended_hours_start_hour']).pack(side=tk.LEFT)
+        ttk.Label(ext_start_frame, text=":").pack(side=tk.LEFT, padx=2)
+        ttk.Spinbox(ext_start_frame, from_=0, to=59, width=5, textvariable=self.config_vars['extended_hours_start_minute']).pack(side=tk.LEFT)
+        
+        # End time
+        ttk.Label(time_frame, text="End Time:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=2)
+        ext_end_frame = ttk.Frame(time_frame)
+        ext_end_frame.grid(row=1, column=1, sticky=tk.W, padx=5, pady=2)
+        
+        ttk.Spinbox(ext_end_frame, from_=0, to=23, width=5, textvariable=self.config_vars['extended_hours_end_hour']).pack(side=tk.LEFT)
+        ttk.Label(ext_end_frame, text=":").pack(side=tk.LEFT, padx=2)
+        ttk.Spinbox(ext_end_frame, from_=0, to=59, width=5, textvariable=self.config_vars['extended_hours_end_minute']).pack(side=tk.LEFT)
+        
+        # Extended hours risk management
+        ext_risk_frame = ttk.LabelFrame(extended_frame, text="Extended Hours Risk Management")
+        ext_risk_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        ttk.Label(ext_risk_frame, text="Max Position Size:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
+        ttk.Entry(ext_risk_frame, textvariable=self.config_vars['extended_hours_max_position_size'], width=10).grid(row=0, column=1, sticky=tk.W, padx=5, pady=2)
+        
+        ttk.Label(ext_risk_frame, text="Stop Loss %:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=2)
+        ttk.Entry(ext_risk_frame, textvariable=self.config_vars['extended_hours_stop_loss_percentage'], width=10).grid(row=1, column=1, sticky=tk.W, padx=5, pady=2)
+        
+        ttk.Label(ext_risk_frame, text="Take Profit %:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
+        ttk.Entry(ext_risk_frame, textvariable=self.config_vars['extended_hours_take_profit_percentage'], width=10).grid(row=2, column=1, sticky=tk.W, padx=5, pady=2)
+        
+        # Information label
+        info_label = ttk.Label(
+            extended_frame,
+            text="Extended hours trading allows trading from 4:00 AM to 8:00 PM ET (Monday-Friday)\n"
+                 "with enhanced risk management for safer 16-hour daily trading.",
+            foreground="blue"
+        )
+        info_label.pack(pady=10)
     
     def _create_labeled_entry(self, parent: tk.Widget, label: str, var_name: str, row: int) -> None:
         """Create a labeled entry widget.
@@ -438,6 +560,16 @@ class ConfigPanel:
                 'trading_end_hour': 'TRADING_END_HOUR',
                 'trading_end_minute': 'TRADING_END_MINUTE',
                 
+                # Extended Hours Trading
+                'extended_hours_enabled': 'extended_hours_enabled',
+                'extended_hours_start_hour': 'extended_hours_start_hour',
+                'extended_hours_start_minute': 'extended_hours_start_minute',
+                'extended_hours_end_hour': 'extended_hours_end_hour',
+                'extended_hours_end_minute': 'extended_hours_end_minute',
+                'extended_hours_max_position_size': 'extended_hours_max_position_size',
+                'extended_hours_stop_loss_percentage': 'extended_hours_stop_loss_percentage',
+                'extended_hours_take_profit_percentage': 'extended_hours_take_profit_percentage',
+                
                 # Data settings
                 'data_update_interval': 'DATA_UPDATE_INTERVAL',
                 'chart_timeframe': 'CHART_TIMEFRAME',
@@ -505,6 +637,16 @@ class ConfigPanel:
                 'TRADING_START_MINUTE': 'trading_start_minute',
                 'TRADING_END_HOUR': 'trading_end_hour',
                 'TRADING_END_MINUTE': 'trading_end_minute',
+                
+                # Extended Hours Trading
+                'extended_hours_enabled': 'extended_hours_enabled',
+                'extended_hours_start_hour': 'extended_hours_start_hour',
+                'extended_hours_start_minute': 'extended_hours_start_minute',
+                'extended_hours_end_hour': 'extended_hours_end_hour',
+                'extended_hours_end_minute': 'extended_hours_end_minute',
+                'extended_hours_max_position_size': 'extended_hours_max_position_size',
+                'extended_hours_stop_loss_percentage': 'extended_hours_stop_loss_percentage',
+                'extended_hours_take_profit_percentage': 'extended_hours_take_profit_percentage',
                 
                 # Data settings
                 'DATA_UPDATE_INTERVAL': 'data_update_interval',

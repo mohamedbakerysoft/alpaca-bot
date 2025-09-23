@@ -217,6 +217,7 @@ class MainWindow:
         # Configuration panel
         from ..config.settings import settings
         self.config_panel = ConfigPanel(notebook, settings, self._on_config_changed)
+        notebook.add(self.config_panel.frame, text="Settings")
     
     
     def _create_positions_display(self, parent: ttk.Frame) -> None:
@@ -526,8 +527,8 @@ class MainWindow:
                 return
             
             # Check market hours
-            is_open = market_hours.is_market_open(settings.weekend_trading_enabled)
-            market_status = market_hours.get_market_status(settings.weekend_trading_enabled)
+            is_open = market_hours.is_market_open(settings.weekend_trading_enabled, settings.extended_hours_enabled)
+            market_status = market_hours.get_market_status(settings.weekend_trading_enabled, settings.extended_hours_enabled)
             
             if not is_open:
                 time_until_open = market_hours.get_time_until_open()
@@ -941,8 +942,8 @@ class MainWindow:
     def _update_market_status(self) -> None:
         """Update the market status display."""
         try:
-            is_open = market_hours.is_market_open(settings.weekend_trading_enabled)
-            status_message = market_hours.get_market_status(settings.weekend_trading_enabled)
+            is_open = market_hours.is_market_open(settings.weekend_trading_enabled, settings.extended_hours_enabled)
+            status_message = market_hours.get_market_status(settings.weekend_trading_enabled, settings.extended_hours_enabled)
             status_text = f"Market: {status_message}"
             
             if not is_open:
