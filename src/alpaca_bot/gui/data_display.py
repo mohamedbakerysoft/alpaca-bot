@@ -656,13 +656,19 @@ class DataDisplay:
     
     def _update_loop(self) -> None:
         """Auto-update loop."""
+        update_counter = 0
         while not self._stop_update.is_set():
             try:
-                self._refresh_data()
-                time.sleep(self.update_interval)
+                # Only refresh data every 3rd cycle to reduce load
+                update_counter += 1
+                if update_counter % 3 == 0:
+                    self._refresh_data()
+                
+                # Increase sleep time for better performance
+                time.sleep(max(self.update_interval * 1.5, 3.0))
             except Exception as e:
                 self.logger.error(f"Error in update loop: {e}")
-                time.sleep(self.update_interval)
+                time.sleep(max(self.update_interval * 1.5, 3.0))
     
     def _refresh_data(self) -> None:
         """Refresh displayed data."""

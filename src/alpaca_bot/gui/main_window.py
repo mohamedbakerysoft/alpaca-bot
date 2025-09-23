@@ -196,18 +196,31 @@ class MainWindow:
             parent: Parent frame.
         """
         # Create notebook for tabbed display
-        notebook = ttk.Notebook(parent)
-        notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.main_notebook = ttk.Notebook(parent)
+        self.main_notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Store tab frames for lazy loading
+        self.tab_frames = {}
+        self.tab_initialized = {}
         
         # Positions tab
-        positions_frame = ttk.Frame(notebook)
-        notebook.add(positions_frame, text="Positions")
-        self._create_positions_display(positions_frame)
+        positions_frame = ttk.Frame(self.main_notebook)
+        self.main_notebook.add(positions_frame, text="Positions")
+        self.tab_frames['positions'] = positions_frame
+        self.tab_initialized['positions'] = False
         
         # Orders tab
-        orders_frame = ttk.Frame(notebook)
-        notebook.add(orders_frame, text="Orders")
-        self._create_orders_display(orders_frame)
+        orders_frame = ttk.Frame(self.main_notebook)
+        self.main_notebook.add(orders_frame, text="Orders")
+        self.tab_frames['orders'] = orders_frame
+        self.tab_initialized['orders'] = False
+        
+        # Initialize first tab only
+        self._create_positions_display(positions_frame)
+        self.tab_initialized['positions'] = True
+        
+        # Bind tab change event for lazy loading
+        self.main_notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
     
     
     def _create_positions_display(self, parent: ttk.Frame) -> None:
@@ -881,11 +894,16 @@ class MainWindow:
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         self.time_display.config(text=current_time)
         
-        # Update market status
-        self._update_market_status()
+        # Update market status less frequently (every 5 updates)
+        if not hasattr(self, '_time_update_counter'):
+            self._time_update_counter = 0
+        self._time_update_counter += 1
         
-        # Schedule next update
-        self.root.after(1000, self._update_time_display)
+        if self._time_update_counter % 5 == 0:
+            self._update_market_status()
+        
+        # Schedule next update every 2 seconds instead of 1 second
+        self.root.after(2000, self._update_time_display)
     
     def _update_market_status(self) -> None:
         """Update the market status display."""
@@ -907,15 +925,35 @@ class MainWindow:
     
     def _start_order_updates(self) -> None:
         """Start periodic order status updates."""
-        self._update_orders_display()
-        # Schedule next update every 15 seconds (reduced frequency for better performance)
-        self.root.after(15000, self._start_order_updates)
+        if self.is_trading:  # Only update when trading is active
+            self._update_orders_display()
+        # Schedule next update every 20 seconds (further reduced for better performance)
+        self.root.after(20000, self._start_order_updates)
     
     def _start_position_updates(self) -> None:
         """Start periodic position display updates."""
-        self._update_positions_display()
-        # Schedule next update every 30 seconds (reduced frequency for better performance)
-        self.root.after(30000, self._start_position_updates)
+        if self.is_trading:  # Only update when trading is active
+            self._update_positions_display()
+        # Schedule next update every 45 seconds (further reduced for better performance)
+        self.root.after(45000, self._start_position_updates)
+    
+    def _on_tab_changed(self, event) -> None:
+        """Handle tab change events for lazy loading.
+        
+        Args:
+            event: Tab change event.
+        """
+        try:
+            selected_tab = self.main_notebook.select()
+            tab_text = self.main_notebook.tab(selected_tab, "text")
+            
+            # Initialize tab content if not already done
+            if tab_text == "Orders" and not self.tab_initialized['orders']:
+                self._create_orders_display(self.tab_frames['orders'])
+                self.tab_initialized['orders'] = True
+                
+        except Exception as e:
+            self.logger.error(f"Error handling tab change: {e}")
     
     def _on_symbols_changed(self, symbols: List[str]) -> None:
         """Handle symbol selection changes.
