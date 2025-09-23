@@ -11,15 +11,15 @@ import os
 class PerformanceConfig:
     """Performance optimization configuration."""
     
-    # GUI Update Intervals (in milliseconds)
-    TIME_DISPLAY_UPDATE_INTERVAL = 2000  # 2 seconds instead of 1
-    ORDER_UPDATE_INTERVAL = 20000        # 20 seconds instead of 15
-    POSITION_UPDATE_INTERVAL = 45000     # 45 seconds instead of 30
+    # Update intervals (in milliseconds) - Optimized for faster profit-taking
+    TIME_DISPLAY_UPDATE_INTERVAL = 1000  # 1 second for faster response
+    ORDER_UPDATE_INTERVAL = 5000         # 5 seconds for faster order monitoring
+    POSITION_UPDATE_INTERVAL = 10000     # 10 seconds for faster position monitoring
     MARKET_STATUS_UPDATE_FREQUENCY = 5   # Update every 5 time display updates
     
     # Data Display Settings
     DATA_REFRESH_SKIP_CYCLES = 3         # Refresh data every 3rd cycle
-    MIN_DATA_UPDATE_INTERVAL = 3.0       # Minimum 3 seconds between updates
+    MIN_DATA_UPDATE_INTERVAL = 1.0       # Minimum 1 second between updates
     DATA_UPDATE_MULTIPLIER = 1.5         # Multiply base interval by this factor
     
     # Chart and Graphics Settings

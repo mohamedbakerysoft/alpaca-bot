@@ -586,9 +586,9 @@ class MainWindow:
                         log_errors=True
                     )
                 
-                # Sleep between iterations
+                # Sleep between iterations - Faster for profit-taking
                 if self.is_trading:
-                    threading.Event().wait(5)  # 5-second interval
+                    threading.Event().wait(2)  # 2-second interval for faster response
         
         def _handle_loop_error(error: Exception) -> None:
             """Handle trading loop errors."""

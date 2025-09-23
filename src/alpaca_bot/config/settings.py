@@ -90,6 +90,18 @@ class Settings:
             default=0.001,  # 0.10% take profit for unified risk management
             cast=float
         )
+        
+        # Trailing stop loss settings
+        self.trailing_stop_enabled: bool = config(
+            "TRAILING_STOP_ENABLED",
+            default=False,
+            cast=bool
+        )
+        self.trailing_stop_percentage: float = config(
+            "TRAILING_STOP_PERCENTAGE",
+            default=0.003,  # 0.3% trailing stop
+            cast=float
+        )
         self.max_daily_loss_percentage: float = config(
             "MAX_DAILY_LOSS_PERCENTAGE",
             default=0.05,  # 5% maximum daily loss

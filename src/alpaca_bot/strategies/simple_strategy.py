@@ -55,6 +55,10 @@ class EnhancedStrategy:
         self.min_order_interval_seconds = getattr(self.settings, 'min_order_interval_seconds', 120)  # Minimum 2 minutes between orders for same symbol
         self.max_price_deviation_pct = getattr(self.settings, 'max_price_deviation_pct', 0.5)  # Maximum 0.5% price deviation for limit orders
         
+        # Trailing stop loss settings
+        self.trailing_stop_enabled = getattr(self.settings, 'trailing_stop_enabled', False)
+        self.trailing_stop_pct = getattr(self.settings, 'trailing_stop_percentage', 0.003)
+        
         # Technical indicator thresholds
         self.rsi_oversold = 30
         self.rsi_overbought = 70
@@ -781,9 +785,32 @@ class EnhancedStrategy:
                         take_profit_price = trade.price * (1 + self.take_profit_pct)
                         profit_pct = ((current_price - trade.price) / trade.price) * 100
                         
+                        # Update trailing stop loss if enabled
+                        if self.trailing_stop_enabled:
+                            # Initialize highest price if not set
+                            if trade.highest_price is None:
+                                trade.highest_price = current_price
+                                trade.trailing_stop_pct = self.trailing_stop_pct
+                                trade.trailing_stop_price = current_price * (1 - self.trailing_stop_pct)
+                            
+                            # Update highest price and trailing stop
+                            if current_price > trade.highest_price:
+                                trade.highest_price = current_price
+                                new_trailing_stop = current_price * (1 - self.trailing_stop_pct)
+                                # Only move trailing stop up, never down
+                                if new_trailing_stop > trade.trailing_stop_price:
+                                    trade.trailing_stop_price = new_trailing_stop
+                                    self.logger.info(f"Updated trailing stop for {symbol}: highest=${trade.highest_price:.2f}, trailing_stop=${trade.trailing_stop_price:.2f}")
+                        
                         self.logger.info(f"Checking {symbol}: Entry=${trade.price:.2f}, Current=${current_price:.2f}, Profit={profit_pct:.2f}%, Take Profit Threshold={self.take_profit_pct*100:.2f}%")
                         
-                        if current_price <= stop_loss_price:
+                        # Check trailing stop loss first (if enabled and set)
+                        if (self.trailing_stop_enabled and 
+                            trade.trailing_stop_price is not None and 
+                            current_price <= trade.trailing_stop_price):
+                            self.logger.info(f"Trailing stop loss triggered for {symbol} at ${current_price:.2f} (trailing stop: ${trade.trailing_stop_price:.2f})")
+                            self._execute_sell_order(symbol, "Trailing stop loss triggered")
+                        elif current_price <= stop_loss_price:
                             self.logger.info(f"Stop loss triggered for {symbol} at ${current_price:.2f}")
                             self._execute_sell_order(symbol, "Stop loss triggered")
                         elif current_price >= take_profit_price:

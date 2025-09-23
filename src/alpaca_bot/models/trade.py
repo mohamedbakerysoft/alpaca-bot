@@ -49,6 +49,11 @@ class Trade:
     notes: str = ""
     strategy: str = "scalping"
     
+    # Trailing stop loss fields
+    highest_price: Optional[float] = None  # Track highest price since entry
+    trailing_stop_pct: Optional[float] = None  # Trailing stop percentage
+    trailing_stop_price: Optional[float] = None  # Current trailing stop price
+    
     def __post_init__(self) -> None:
         """Post-initialization validation."""
         if self.quantity <= 0:

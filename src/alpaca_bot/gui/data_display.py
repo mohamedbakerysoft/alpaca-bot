@@ -58,7 +58,7 @@ class DataDisplay:
         
         # Update control
         self.auto_update = tk.BooleanVar(value=True)
-        self.update_interval = 5  # seconds
+        self.update_interval = 2  # seconds - Faster for profit-taking
         self._update_thread = None
         self._stop_update = threading.Event()
         
