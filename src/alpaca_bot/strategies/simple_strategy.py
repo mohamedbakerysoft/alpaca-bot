@@ -49,6 +49,12 @@ class EnhancedStrategy:
         self.max_daily_trades = getattr(self.settings, 'max_daily_trades', 8)      # Maximum trades per day from settings
         self.min_volume_threshold = 50000  # Reduced from 100000 to 50000 - Minimum daily volume
         
+        # Order execution optimization settings
+        self.use_market_orders = getattr(self.settings, 'use_market_orders_for_sell', True)  # Use market orders for faster execution
+        self.order_timeout_minutes = getattr(self.settings, 'order_timeout_minutes', 5)     # Cancel orders after 5 minutes
+        self.min_order_interval_seconds = getattr(self.settings, 'min_order_interval_seconds', 120)  # Minimum 2 minutes between orders for same symbol
+        self.max_price_deviation_pct = getattr(self.settings, 'max_price_deviation_pct', 0.5)  # Maximum 0.5% price deviation for limit orders
+        
         # Technical indicator thresholds
         self.rsi_oversold = 30
         self.rsi_overbought = 70
@@ -520,10 +526,15 @@ class EnhancedStrategy:
                 self.logger.warning(f"No active position for {symbol}")
                 return None
             
-            # Check for and cancel any existing pending sell orders for this symbol
-            cancelled_orders = self.cancel_pending_orders(symbol)
+            # Check if there's already a recent sell order for this symbol
+            if self._has_recent_sell_order(symbol):
+                self.logger.info(f"Recent sell order already exists for {symbol}, skipping new order")
+                return None
+            
+            # Check for and cancel any existing pending sell orders for this symbol (only if older than 5 minutes)
+            cancelled_orders = self._cancel_old_pending_orders(symbol, max_age_minutes=5)
             if cancelled_orders > 0:
-                self.logger.info(f"Cancelled {cancelled_orders} pending sell orders for {symbol} before placing new order")
+                self.logger.info(f"Cancelled {cancelled_orders} old pending sell orders for {symbol} before placing new order")
             
             position_trade = self.active_positions[symbol]
             
@@ -871,6 +882,111 @@ class EnhancedStrategy:
             self.logger.error(f"Error cancelling pending orders: {e}")
             
         return cancelled_count
+
+    def _cancel_old_pending_orders(self, symbol: str, max_age_minutes: int = 5) -> int:
+        """Cancel pending orders for a specific symbol only if they are older than max_age_minutes.
+        
+        Args:
+            symbol: Symbol to cancel orders for.
+            max_age_minutes: Maximum age in minutes before canceling orders.
+            
+        Returns:
+            Number of orders cancelled.
+        """
+        cancelled_count = 0
+        
+        try:
+            # Get all open orders
+            open_orders = self.alpaca_client.get_orders(status='open', limit=100)
+            if not open_orders:
+                return 0
+            
+            current_time = datetime.now()
+            
+            for order in open_orders:
+                # Only check sell orders for the specified symbol
+                if order.symbol == symbol and order.side == 'sell':
+                    try:
+                        # Handle different datetime formats
+                        created_at = order.created_at
+                        if hasattr(created_at, 'timestamp'):
+                            created_time = created_at
+                        else:
+                            created_time = datetime.fromisoformat(str(created_at).replace('Z', '+00:00'))
+                        
+                        # Calculate age in minutes
+                        age = current_time - created_time.replace(tzinfo=None)
+                        age_minutes = age.total_seconds() / 60
+                        
+                        # Only cancel if older than max_age_minutes
+                        if age_minutes > max_age_minutes:
+                            self.alpaca_client.cancel_order(order.id)
+                            self.logger.info(f"Cancelled old pending sell order for {symbol}: {order.id} (age: {age_minutes:.1f} minutes)")
+                            cancelled_count += 1
+                            
+                            # Remove from our pending orders tracking
+                            if symbol in self.pending_orders and self.pending_orders[symbol] == order.id:
+                                del self.pending_orders[symbol]
+                        else:
+                            self.logger.debug(f"Keeping recent sell order for {symbol}: {order.id} (age: {age_minutes:.1f} minutes)")
+                            
+                    except Exception as e:
+                        self.logger.warning(f"Failed to process order {order.id} for {symbol}: {e}")
+            
+            if cancelled_count > 0:
+                self.logger.info(f"Successfully cancelled {cancelled_count} old pending orders for {symbol}")
+                
+        except Exception as e:
+            self.logger.error(f"Error cancelling old pending orders for {symbol}: {e}")
+            
+        return cancelled_count
+
+    def _has_recent_sell_order(self, symbol: str, max_age_minutes: int = 2) -> bool:
+        """Check if there's already a recent sell order for the symbol.
+        
+        Args:
+            symbol: Symbol to check.
+            max_age_minutes: Maximum age in minutes to consider as recent.
+            
+        Returns:
+            True if there's a recent sell order, False otherwise.
+        """
+        try:
+            # Get all open orders
+            open_orders = self.alpaca_client.get_orders(status='open', limit=100)
+            if not open_orders:
+                return False
+            
+            current_time = datetime.now()
+            
+            for order in open_orders:
+                # Only check sell orders for the specified symbol
+                if order.symbol == symbol and order.side == 'sell':
+                    try:
+                        # Handle different datetime formats
+                        created_at = order.created_at
+                        if hasattr(created_at, 'timestamp'):
+                            created_time = created_at
+                        else:
+                            created_time = datetime.fromisoformat(str(created_at).replace('Z', '+00:00'))
+                        
+                        # Calculate age in minutes
+                        age = current_time - created_time.replace(tzinfo=None)
+                        age_minutes = age.total_seconds() / 60
+                        
+                        # If there's a recent sell order, return True
+                        if age_minutes <= max_age_minutes:
+                            self.logger.debug(f"Found recent sell order for {symbol}: {order.id} (age: {age_minutes:.1f} minutes)")
+                            return True
+                            
+                    except Exception as e:
+                        self.logger.warning(f"Failed to process order {order.id} for {symbol}: {e}")
+            
+            return False
+                
+        except Exception as e:
+            self.logger.error(f"Error checking recent sell orders for {symbol}: {e}")
+            return False
 
     def _batch_check_pending_orders(self) -> None:
         """Check all pending orders in a single batch API call."""
