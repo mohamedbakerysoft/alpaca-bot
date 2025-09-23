@@ -87,33 +87,64 @@ class EnhancedStrategy:
     def _load_existing_positions(self):
         """Load existing positions from Alpaca into the strategy's tracking system."""
         try:
+            self.logger.info("Attempting to load existing positions from Alpaca...")
             positions = self.alpaca_client.get_positions()
+            
             if positions:
-                for position in positions:
-                    symbol = position.symbol
-                    qty = float(position.qty)
-                    avg_entry_price = float(position.avg_entry_price)
-                    
-                    if qty > 0 and avg_entry_price > 0:  # Only track long positions
-                        # Create a Trade object for tracking
-                        trade = Trade(
-                            symbol=symbol,
-                            trade_type=TradeType.BUY,
-                            quantity=qty,
-                            price=avg_entry_price,
-                            timestamp=datetime.now(),
-                            order_type=OrderType.MARKET,
-                            notes="Existing position loaded from Alpaca"
-                        )
-                        self.active_positions[symbol] = trade
-                        self.logger.info(f"Loaded existing position: {symbol} - {qty} shares at ${avg_entry_price:.2f}")
+                self.logger.info(f"Found {len(positions)} positions in Alpaca account")
+                loaded_count = 0
                 
-                self.logger.info(f"Loaded {len(self.active_positions)} existing positions from Alpaca")
+                for position in positions:
+                    try:
+                        symbol = position.symbol
+                        qty = float(position.qty)
+                        avg_entry_price = float(position.avg_entry_price)
+                        market_value = float(position.market_value) if hasattr(position, 'market_value') else 0
+                        unrealized_pl = float(position.unrealized_pl) if hasattr(position, 'unrealized_pl') else 0
+                        
+                        self.logger.info(f"Processing position: {symbol} - Qty: {qty}, Entry: ${avg_entry_price:.2f}, Value: ${market_value:.2f}, P&L: ${unrealized_pl:.2f}")
+                        
+                        if qty > 0 and avg_entry_price > 0:  # Only track long positions
+                            # Create a Trade object for tracking
+                            trade = Trade(
+                                symbol=symbol,
+                                trade_type=TradeType.BUY,
+                                quantity=qty,
+                                price=avg_entry_price,
+                                timestamp=datetime.now(),
+                                order_type=OrderType.MARKET,
+                                status=TradeStatus.FILLED,
+                                notes="Existing position loaded from Alpaca"
+                            )
+                            self.active_positions[symbol] = trade
+                            loaded_count += 1
+                            
+                            # Calculate current P&L percentage for logging
+                            if market_value > 0 and qty > 0:
+                                current_price = market_value / qty
+                                pnl_pct = ((current_price - avg_entry_price) / avg_entry_price) * 100
+                                self.logger.info(f"✓ Loaded position: {symbol} - {qty:.4f} shares at ${avg_entry_price:.2f}, Current P&L: {pnl_pct:.2f}%")
+                            else:
+                                self.logger.info(f"✓ Loaded position: {symbol} - {qty:.4f} shares at ${avg_entry_price:.2f}")
+                        else:
+                            self.logger.warning(f"Skipping position {symbol}: qty={qty}, price={avg_entry_price}")
+                            
+                    except Exception as pos_error:
+                        self.logger.error(f"Error processing position {symbol}: {pos_error}")
+                        continue
+                
+                self.logger.info(f"Successfully loaded {loaded_count} existing positions from Alpaca")
+                
+                # Log current take profit and stop loss settings for reference
+                self.logger.info(f"Strategy settings - Take Profit: {self.take_profit_pct*100:.2f}%, Stop Loss: {self.stop_loss_pct*100:.2f}%")
+                
             else:
                 self.logger.info("No existing positions found in Alpaca account")
                 
         except Exception as e:
             self.logger.error(f"Error loading existing positions: {e}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
 
     def set_callbacks(self, account_callback=None, order_callback=None, position_callback=None):
         """Set callback functions for updates."""
