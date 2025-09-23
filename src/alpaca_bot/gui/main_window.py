@@ -10,7 +10,7 @@ This module provides the main interface with:
 import logging
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -27,7 +27,7 @@ from ..utils.market_utils import market_hours
 from .stock_selector import StockSelectorFrame
 from .trading_panel import TradingPanel
 
-from .config_panel import ConfigPanel
+
 
 
 class MainWindow:
@@ -208,16 +208,6 @@ class MainWindow:
         orders_frame = ttk.Frame(notebook)
         notebook.add(orders_frame, text="Orders")
         self._create_orders_display(orders_frame)
-        
-        # Trading Log tab
-        log_frame = ttk.Frame(notebook)
-        notebook.add(log_frame, text="Trading Log")
-        self._create_log_display(log_frame)
-        
-        # Configuration panel
-        from ..config.settings import settings
-        self.config_panel = ConfigPanel(notebook, settings, self._on_config_changed)
-        notebook.add(self.config_panel.frame, text="Settings")
     
     
     def _create_positions_display(self, parent: ttk.Frame) -> None:
@@ -292,69 +282,7 @@ class MainWindow:
         # Start periodic order updates
         self._start_order_updates()
     
-    def _create_log_display(self, parent: ttk.Frame) -> None:
-        """Create the trading log display.
-        
-        Args:
-            parent: Parent frame.
-        """
-        # Create scrolled text widget for log messages
-        self.log_text = scrolledtext.ScrolledText(
-            parent,
-            wrap=tk.WORD,
-            height=15,
-            font=('Consolas', 9),
-            state=tk.DISABLED
-        )
-        self.log_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Configure text tags for different message types
-        self.log_text.tag_configure('info', foreground='blue')
-        self.log_text.tag_configure('success', foreground='green')
-        self.log_text.tag_configure('warning', foreground='orange')
-        self.log_text.tag_configure('error', foreground='red')
-        self.log_text.tag_configure('trade', foreground='purple', font=('Consolas', 9, 'bold'))
-    
-    def _log_message(self, message: str, message_type: str = 'info') -> None:
-        """Log a message to the trading log display.
-        
-        Args:
-            message: Message to log.
-            message_type: Type of message (info, success, warning, error, trade).
-        """
-        if not hasattr(self, 'log_text'):
-            # If log display not created yet, just use logger
-            self.logger.info(message)
-            return
-        
-        # Get current time
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        
-        # Format message with timestamp
-        formatted_message = f"[{timestamp}] {message}\n"
-        
-        # Add message to log display
-        self.log_text.config(state=tk.NORMAL)
-        self.log_text.insert(tk.END, formatted_message, message_type)
-        self.log_text.config(state=tk.DISABLED)
-        
-        # Auto-scroll to bottom
-        self.log_text.see(tk.END)
-        
-        # Also log to file
-        if message_type == 'error':
-            self.logger.error(message)
-        elif message_type == 'warning':
-            self.logger.warning(message)
-        else:
-            self.logger.info(message)
-        
-        # Limit log size (keep last 1000 lines)
-        lines = self.log_text.get('1.0', tk.END).split('\n')
-        if len(lines) > 1000:
-            self.log_text.config(state=tk.NORMAL)
-            self.log_text.delete('1.0', f'{len(lines) - 1000}.0')
-            self.log_text.config(state=tk.DISABLED)
+
     
         # Configure status-based row colors
         self.orders_tree.tag_configure('filled', background='#d4edda')
@@ -566,7 +494,6 @@ class MainWindow:
             self.trading_thread.start()
             
             self.logger.info("Trading started")
-            self._log_message("Trading started", "success")
         
         def _handle_start_error(error: Exception) -> None:
             """Handle trading start errors."""
@@ -593,7 +520,6 @@ class MainWindow:
             self.start_stop_btn.config(text="Start Trading", style="Accent.TButton")
             
             self.logger.info("Trading stopped")
-            self._log_message("Trading stopped", "warning")
             return True
         
         safe_execute(
@@ -636,10 +562,7 @@ class MainWindow:
                             
                             trade = self.strategy.execute_trade(symbol, signal_type, reason)
                             if trade:
-                                self._log_message(
-                                    f"{signal_type} signal executed for {symbol}: {reason}",
-                                    "trade"
-                                )
+                                self.logger.info(f"{signal_type} signal executed for {symbol}: {reason}")
                         
                         # Update displays
                         self.root.after(0, self._update_displays)
@@ -680,22 +603,22 @@ class MainWindow:
             error: The exception that occurred.
         """
         if isinstance(error, MarketDataError):
-            self._log_message(f"Market data unavailable for {symbol}", "warning")
+            self.logger.warning(f"Market data unavailable for {symbol}")
         elif isinstance(error, OrderExecutionError):
-            self._log_message(f"Order execution failed for {symbol}: {error}", "error")
+            self.logger.error(f"Order execution failed for {symbol}: {error}")
             messagebox.showwarning(
                 "Order Failed",
                 f"Failed to execute order for {symbol}. Check your account status."
             )
         elif isinstance(error, RateLimitError):
-            self._log_message("Rate limit exceeded, pausing trading", "error")
+            self.logger.error("Rate limit exceeded, pausing trading")
             self.is_trading = False
             messagebox.showwarning(
                 "Rate Limit",
                 "API rate limit exceeded. Trading has been paused."
             )
         else:
-            self._log_message(f"Error processing {symbol}: {error}", "error")
+            self.logger.error(f"Error processing {symbol}: {error}")
     
     def _handle_critical_trading_error(self, error: Exception) -> None:
         """Handle critical trading loop errors.
@@ -762,86 +685,108 @@ class MainWindow:
             for item in self.positions_tree.get_children():
                 self.positions_tree.delete(item)
             
+            positions_found = 0
+            
             # Get actual positions from Alpaca
             try:
                 alpaca_positions = self.alpaca_client.get_positions()
+                self.logger.info(f"Found {len(alpaca_positions) if alpaca_positions else 0} Alpaca positions")
                 
-                for position in alpaca_positions:
-                    try:
-                        symbol = position.symbol
-                        quantity = float(position.qty) if position.qty is not None else 0.0
-                        avg_price = float(position.avg_entry_price) if position.avg_entry_price is not None else 0.0
-                        
-                        # Calculate current price safely
-                        if position.market_value is not None and quantity != 0:
-                            current_price = float(position.market_value) / quantity
-                        else:
-                            current_price = avg_price
-                            
-                        unrealized_pnl = float(position.unrealized_pl) if position.unrealized_pl is not None else 0.0
-                        unrealized_pnl_pct = float(position.unrealized_plpc) * 100 if position.unrealized_plpc is not None else 0.0
-                        
-                        # Calculate dollar value of position
-                        dollar_value = abs(quantity) * current_price
-                        
-                        # Insert into treeview with dollar value as primary display
-                        self.positions_tree.insert('', 'end', values=(
-                            symbol,
-                            f"${dollar_value:,.2f}",
-                            f"{float(quantity):.6f}".rstrip('0').rstrip('.'),
-                            f"${avg_price:.2f}",
-                            f"${current_price:.2f}",
-                            f"${unrealized_pnl:+.2f}",
-                            f"{unrealized_pnl_pct:+.2f}%"
-                        ))
-                        
-                    except Exception as e:
-                        self.logger.error(f"Error processing position for {position.symbol}: {e}")
-                        
-            except Exception as e:
-                self.logger.error(f"Error fetching Alpaca positions: {e}")
-                # Fallback to strategy positions if Alpaca positions fail
-                if self.strategy:
-                    for symbol, trade in self.strategy.active_positions.items():
+                if alpaca_positions:
+                    for position in alpaca_positions:
                         try:
-                            # Get current quote
-                            quote = self.alpaca_client.get_latest_quote(symbol)
-                            current_price = quote.bid if quote and hasattr(quote, 'bid') and quote.bid is not None else (trade.entry_price if trade.entry_price is not None else 0.0)
+                            symbol = position.symbol
+                            quantity = float(position.qty) if position.qty is not None else 0.0
                             
-                            # Ensure current_price is never None
-                            if current_price is None:
-                                current_price = trade.entry_price if trade.entry_price is not None else 0.0
+                            # Skip positions with zero quantity
+                            if quantity == 0:
+                                continue
+                                
+                            avg_price = float(position.avg_entry_price) if position.avg_entry_price is not None else 0.0
                             
-                            # Calculate P&L with proper None checks
-                            if (current_price is not None and trade.entry_price is not None and 
-                                trade.quantity is not None and trade.entry_price != 0):
-                                pnl = (current_price - trade.entry_price) * trade.quantity
-                                pnl_pct = (current_price - trade.entry_price) / trade.entry_price * 100
+                            # Calculate current price safely
+                            if position.market_value is not None and quantity != 0:
+                                current_price = float(position.market_value) / abs(quantity)
                             else:
-                                pnl = 0.0
-                                pnl_pct = 0.0
-                                current_price = trade.entry_price if trade.entry_price is not None else 0.0
-                            
-                            # Insert into treeview with safe formatting and dollar value
-                            entry_price_str = f"${trade.entry_price:.2f}" if trade.entry_price is not None else "$0.00"
-                            current_price_str = f"${current_price:.2f}" if current_price is not None else "$0.00"
-                            quantity_str = f"{trade.quantity:.6f}".rstrip('0').rstrip('.') if trade.quantity is not None else "0"
+                                current_price = avg_price
+                                
+                            unrealized_pnl = float(position.unrealized_pl) if position.unrealized_pl is not None else 0.0
+                            unrealized_pnl_pct = float(position.unrealized_plpc) * 100 if position.unrealized_plpc is not None else 0.0
                             
                             # Calculate dollar value of position
-                            dollar_value = abs(trade.quantity) * current_price if trade.quantity is not None and current_price is not None else 0.0
+                            dollar_value = abs(quantity) * current_price
                             
+                            # Insert into treeview with dollar value as primary display
                             self.positions_tree.insert('', 'end', values=(
                                 symbol,
                                 f"${dollar_value:,.2f}",
-                                quantity_str,
-                                entry_price_str,
-                                current_price_str,
-                                f"${pnl:+.2f}",
-                                f"{pnl_pct:+.2f}%"
+                                f"{float(quantity):.6f}".rstrip('0').rstrip('.'),
+                                f"${avg_price:.2f}",
+                                f"${current_price:.2f}",
+                                f"${unrealized_pnl:+.2f}",
+                                f"{unrealized_pnl_pct:+.2f}%"
                             ))
                             
+                            positions_found += 1
+                            self.logger.debug(f"Added position: {symbol} - {quantity} shares @ ${current_price:.2f}")
+                            
                         except Exception as e:
-                            self.logger.error(f"Error updating fallback position for {symbol}: {e}")
+                            self.logger.error(f"Error processing position for {position.symbol}: {e}")
+                            
+            except Exception as e:
+                self.logger.error(f"Error fetching Alpaca positions: {e}")
+                
+            # If no Alpaca positions found, try strategy positions as fallback
+            if positions_found == 0 and self.strategy and hasattr(self.strategy, 'active_positions'):
+                self.logger.info("No Alpaca positions found, checking strategy positions")
+                for symbol, trade in self.strategy.active_positions.items():
+                    try:
+                        if trade.quantity is None or trade.quantity == 0:
+                            continue
+                            
+                        # Get current quote
+                        quote = self.alpaca_client.get_latest_quote(symbol)
+                        current_price = quote.bid if quote and hasattr(quote, 'bid') and quote.bid is not None else (trade.entry_price if trade.entry_price is not None else 0.0)
+                        
+                        # Ensure current_price is never None
+                        if current_price is None:
+                            current_price = trade.entry_price if trade.entry_price is not None else 0.0
+                        
+                        # Calculate P&L with proper None checks
+                        if (current_price is not None and trade.entry_price is not None and 
+                            trade.quantity is not None and trade.entry_price != 0):
+                            pnl = (current_price - trade.entry_price) * trade.quantity
+                            pnl_pct = (current_price - trade.entry_price) / trade.entry_price * 100
+                        else:
+                            pnl = 0.0
+                            pnl_pct = 0.0
+                            current_price = trade.entry_price if trade.entry_price is not None else 0.0
+                        
+                        # Insert into treeview with safe formatting and dollar value
+                        entry_price_str = f"${trade.entry_price:.2f}" if trade.entry_price is not None else "$0.00"
+                        current_price_str = f"${current_price:.2f}" if current_price is not None else "$0.00"
+                        quantity_str = f"{trade.quantity:.6f}".rstrip('0').rstrip('.') if trade.quantity is not None else "0"
+                        
+                        # Calculate dollar value of position
+                        dollar_value = abs(trade.quantity) * current_price if trade.quantity is not None and current_price is not None else 0.0
+                        
+                        self.positions_tree.insert('', 'end', values=(
+                            symbol,
+                            f"${dollar_value:,.2f}",
+                            quantity_str,
+                            entry_price_str,
+                            current_price_str,
+                            f"${pnl:+.2f}",
+                            f"{pnl_pct:+.2f}%"
+                        ))
+                        
+                        positions_found += 1
+                        self.logger.debug(f"Added strategy position: {symbol} - {trade.quantity} shares")
+                        
+                    except Exception as e:
+                        self.logger.error(f"Error updating fallback position for {symbol}: {e}")
+            
+            self.logger.info(f"Position display updated with {positions_found} positions")
                     
         except Exception as e:
             self.logger.error(f"Error updating positions display: {e}")
@@ -963,14 +908,14 @@ class MainWindow:
     def _start_order_updates(self) -> None:
         """Start periodic order status updates."""
         self._update_orders_display()
-        # Schedule next update every 5 seconds
-        self.root.after(5000, self._start_order_updates)
+        # Schedule next update every 15 seconds (reduced frequency for better performance)
+        self.root.after(15000, self._start_order_updates)
     
     def _start_position_updates(self) -> None:
         """Start periodic position display updates."""
         self._update_positions_display()
-        # Schedule next update every 10 seconds (less frequent than orders)
-        self.root.after(10000, self._start_position_updates)
+        # Schedule next update every 30 seconds (reduced frequency for better performance)
+        self.root.after(30000, self._start_position_updates)
     
     def _on_symbols_changed(self, symbols: List[str]) -> None:
         """Handle symbol selection changes.
@@ -1017,14 +962,8 @@ class MainWindow:
     def _show_startup_message(self) -> None:
         """Show startup message about trading status."""
         if not self.is_trading:
-            self._log_message(
-                "التطبيق جاهز! اضغط على 'Start Trading' لبدء التحليف والتداول التلقائي",
-                "info"
-            )
-            self._log_message(
-                "Application ready! Click 'Start Trading' to begin analysis and automated trading",
-                "info"
-            )
+            self.logger.info("التطبيق جاهز! اضغط على 'Start Trading' لبدء التحليف والتداول التلقائي")
+            self.logger.info("Application ready! Click 'Start Trading' to begin analysis and automated trading")
     
     def _show_settings(self) -> None:
         """Show settings dialog."""
