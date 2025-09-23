@@ -482,7 +482,32 @@ class EnhancedStrategy:
                 return None
             
             position_trade = self.active_positions[symbol]
-            quantity = position_trade.quantity
+            
+            # Verify actual position quantity with Alpaca before selling
+            try:
+                alpaca_position = self.alpaca_client.get_position(symbol)
+                if alpaca_position:
+                    actual_quantity = float(alpaca_position.qty)
+                    if actual_quantity <= 0:
+                        self.logger.warning(f"No actual position for {symbol} in Alpaca (qty: {actual_quantity}). Removing from tracking.")
+                        del self.active_positions[symbol]
+                        return None
+                    
+                    # Use the actual quantity from Alpaca, not our tracked quantity
+                    quantity = actual_quantity
+                    
+                    # Update our tracked quantity if it differs
+                    if abs(quantity - position_trade.quantity) > 0.0001:
+                        self.logger.info(f"Updating tracked quantity for {symbol}: {position_trade.quantity} -> {quantity}")
+                        position_trade.quantity = quantity
+                else:
+                    self.logger.warning(f"Position {symbol} not found in Alpaca. Removing from tracking.")
+                    del self.active_positions[symbol]
+                    return None
+            except Exception as e:
+                self.logger.error(f"Error verifying position for {symbol}: {e}")
+                # Fall back to tracked quantity if verification fails
+                quantity = position_trade.quantity
             
             # Get current quote
             quote = self.alpaca_client.get_latest_quote(symbol)
@@ -557,9 +582,64 @@ class EnhancedStrategy:
         if symbol in self.pending_orders:
             del self.pending_orders[symbol]
 
+    def _refresh_positions_from_alpaca(self):
+        """Refresh position tracking from Alpaca to ensure all positions are monitored."""
+        try:
+            alpaca_positions = self.alpaca_client.get_positions()
+            
+            # Track symbols we've seen in Alpaca
+            alpaca_symbols = set()
+            
+            for position in alpaca_positions:
+                symbol = position.symbol
+                quantity = float(position.qty)
+                entry_price = float(position.avg_entry_price)
+                alpaca_symbols.add(symbol)
+                
+                # Skip positions with zero quantity
+                if quantity <= 0:
+                    continue
+                
+                # If we're not tracking this position, add it
+                if symbol not in self.active_positions:
+                    self.logger.info(f"Adding untracked position from Alpaca: {symbol} ({quantity} shares @ ${entry_price:.2f})")
+                    trade = Trade(
+                        symbol=symbol,
+                        trade_type=TradeType.BUY,
+                        quantity=quantity,
+                        price=entry_price,
+                        timestamp=datetime.now(),
+                        order_id=f"alpaca_sync_{symbol}",
+                        order_type=OrderType.MARKET,
+                        notes="Position synced from Alpaca"
+                    )
+                    self.active_positions[symbol] = trade
+                else:
+                    # Update quantity if it differs
+                    tracked_trade = self.active_positions[symbol]
+                    if abs(quantity - tracked_trade.quantity) > 0.0001:
+                        self.logger.info(f"Updating quantity for {symbol}: {tracked_trade.quantity} -> {quantity}")
+                        tracked_trade.quantity = quantity
+            
+            # Remove positions we're tracking that no longer exist in Alpaca
+            symbols_to_remove = []
+            for symbol in self.active_positions:
+                if symbol not in alpaca_symbols:
+                    self.logger.info(f"Removing position {symbol} - no longer in Alpaca")
+                    symbols_to_remove.append(symbol)
+            
+            for symbol in symbols_to_remove:
+                del self.active_positions[symbol]
+                
+        except Exception as e:
+            self.logger.error(f"Error refreshing positions from Alpaca: {e}")
+
     def update_positions(self) -> None:
         """Update active positions and pending orders."""
         try:
+            # Refresh positions from Alpaca every update to ensure we're monitoring everything
+            self._refresh_positions_from_alpaca()
+            
             self.logger.info(f"Checking positions - Active positions: {len(self.active_positions)}, Pending orders: {len(self.pending_orders)}")
             # Check pending orders
             for symbol, order_id in list(self.pending_orders.items()):
@@ -633,10 +713,10 @@ class EnhancedStrategy:
                         
                         if current_price <= stop_loss_price:
                             self.logger.info(f"Stop loss triggered for {symbol} at ${current_price:.2f}")
-                            self.execute_sell_order(symbol, "Stop loss triggered")
+                            self._execute_sell_order(symbol, "Stop loss triggered")
                         elif current_price >= take_profit_price:
                             self.logger.info(f"Take profit triggered for {symbol} at ${current_price:.2f} (profit: {profit_pct:.2f}%)")
-                            self.execute_sell_order(symbol, "Take profit triggered")
+                            self._execute_sell_order(symbol, "Take profit triggered")
                             
                 except Exception as e:
                     self.logger.error(f"Error checking exit conditions for {symbol}: {e}")
