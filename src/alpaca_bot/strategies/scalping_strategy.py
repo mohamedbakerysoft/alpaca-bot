@@ -297,6 +297,62 @@ class ScalpingStrategy:
             log_errors=True
         )
     
+    def cancel_pending_orders(self, symbol: Optional[str] = None) -> int:
+        """Cancel pending orders to free up locked positions.
+        
+        Args:
+            symbol: If provided, only cancel orders for this symbol. If None, cancel all pending sell orders.
+            
+        Returns:
+            int: Number of orders successfully canceled.
+        """
+        def _cancel_orders():
+            canceled_count = 0
+            
+            try:
+                # Get all pending orders
+                pending_orders = self.alpaca_client.get_orders(status='open', limit=50)
+                
+                for order in pending_orders:
+                    # Filter by symbol if specified, otherwise cancel all sell orders
+                    if symbol and order.symbol != symbol:
+                        continue
+                    if not symbol and order.side != 'sell':
+                        continue
+                    if symbol and order.side != 'sell':
+                        continue
+                        
+                    try:
+                        self.logger.info(f"Canceling pending {order.side} order for {order.symbol} (ID: {order.id})")
+                        self.alpaca_client.cancel_order(order.id)
+                        canceled_count += 1
+                        
+                        # Remove from pending orders tracking
+                        if order.symbol in self.pending_orders:
+                            del self.pending_orders[order.symbol]
+                            
+                    except Exception as e:
+                        self.logger.warning(f"Failed to cancel order {order.id} for {order.symbol}: {e}")
+                
+                if canceled_count > 0:
+                    self.logger.info(f"Successfully canceled {canceled_count} pending orders")
+                    
+                    # Trigger GUI updates
+                    if self.order_update_callback:
+                        self.order_update_callback()
+                        
+                return canceled_count
+                
+            except Exception as e:
+                self.logger.error(f"Error canceling pending orders: {e}")
+                return 0
+        
+        return safe_execute(
+            _cancel_orders,
+            default_return=0,
+            log_errors=True
+        )
+    
     def _reset_daily_counters_if_needed(self) -> None:
         """Reset daily counters if it's a new trading day."""
         current_date = datetime.now().date()
@@ -1004,6 +1060,17 @@ class ScalpingStrategy:
         if symbol not in self.active_positions:
             self.logger.warning(f"No active position for {symbol}")
             return None
+        
+        # Check for existing pending sell orders to avoid "insufficient qty available" error
+        try:
+            pending_orders = self.alpaca_client.get_orders(status='open', limit=50)
+            for order in pending_orders:
+                if order.symbol == symbol and order.side == 'sell':
+                    self.logger.warning(f"Skipping sell order for {symbol} - pending sell order already exists (ID: {order.id})")
+                    return None
+        except Exception as e:
+            self.logger.warning(f"Could not check pending orders for {symbol}: {e}")
+            # Continue with order placement as this is just a safety check
         
         position_trade = self.active_positions[symbol]
         
