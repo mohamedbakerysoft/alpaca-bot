@@ -517,13 +517,27 @@ class EnhancedStrategy:
             current_price = float(quote['bid'])
             
             # Place market sell order
-            order = self.alpaca_client.place_order(
-                symbol=symbol,
-                qty=quantity,
-                side='sell',
-                order_type='market',
-                time_in_force='day'
-            )
+            try:
+                order = self.alpaca_client.place_order(
+                    symbol=symbol,
+                    qty=quantity,
+                    side='sell',
+                    order_type='market',
+                    time_in_force='day'
+                )
+            except Exception as order_error:
+                # Handle insufficient quantity and other order errors gracefully
+                error_msg = str(order_error).lower()
+                if 'insufficient qty' in error_msg or 'insufficient quantity' in error_msg:
+                    self.logger.warning(f"Insufficient quantity for {symbol}. Removing from tracking and syncing positions.")
+                    # Remove from tracking since we can't sell it
+                    del self.active_positions[symbol]
+                    # Force a position refresh to sync with Alpaca
+                    self._refresh_positions_from_alpaca()
+                    return None
+                else:
+                    # Re-raise other order errors
+                    raise OrderExecutionError(f"Failed to execute sell order for {quantity} {symbol}: {order_error}")
             
             if not order:
                 raise OrderExecutionError("Failed to submit sell order")
@@ -587,49 +601,54 @@ class EnhancedStrategy:
         try:
             alpaca_positions = self.alpaca_client.get_positions()
             
-            # Track symbols we've seen in Alpaca
+            # Track symbols we've seen in Alpaca with positive quantities
             alpaca_symbols = set()
             
             for position in alpaca_positions:
                 symbol = position.symbol
                 quantity = float(position.qty)
                 entry_price = float(position.avg_entry_price)
-                alpaca_symbols.add(symbol)
                 
-                # Skip positions with zero quantity
-                if quantity <= 0:
-                    continue
-                
-                # If we're not tracking this position, add it
-                if symbol not in self.active_positions:
-                    self.logger.info(f"Adding untracked position from Alpaca: {symbol} ({quantity} shares @ ${entry_price:.2f})")
-                    trade = Trade(
-                        symbol=symbol,
-                        trade_type=TradeType.BUY,
-                        quantity=quantity,
-                        price=entry_price,
-                        timestamp=datetime.now(),
-                        order_id=f"alpaca_sync_{symbol}",
-                        order_type=OrderType.MARKET,
-                        notes="Position synced from Alpaca"
-                    )
-                    self.active_positions[symbol] = trade
+                # Only track positions with positive quantities
+                if quantity > 0:
+                    alpaca_symbols.add(symbol)
+                    
+                    # If we're not tracking this position, add it
+                    if symbol not in self.active_positions:
+                        self.logger.info(f"Adding untracked position from Alpaca: {symbol} ({quantity} shares @ ${entry_price:.2f})")
+                        trade = Trade(
+                            symbol=symbol,
+                            trade_type=TradeType.BUY,
+                            quantity=quantity,
+                            price=entry_price,
+                            timestamp=datetime.now(),
+                            order_id=f"alpaca_sync_{symbol}",
+                            order_type=OrderType.MARKET,
+                            notes="Position synced from Alpaca"
+                        )
+                        self.active_positions[symbol] = trade
+                    else:
+                        # Update quantity if it differs
+                        tracked_trade = self.active_positions[symbol]
+                        if abs(quantity - tracked_trade.quantity) > 0.0001:
+                            self.logger.info(f"Updating quantity for {symbol}: {tracked_trade.quantity} -> {quantity}")
+                            tracked_trade.quantity = quantity
                 else:
-                    # Update quantity if it differs
-                    tracked_trade = self.active_positions[symbol]
-                    if abs(quantity - tracked_trade.quantity) > 0.0001:
-                        self.logger.info(f"Updating quantity for {symbol}: {tracked_trade.quantity} -> {quantity}")
-                        tracked_trade.quantity = quantity
+                    # Position has zero or negative quantity - should not be tracked
+                    if symbol in self.active_positions:
+                        self.logger.info(f"Removing position {symbol} - quantity is {quantity} in Alpaca")
+                        del self.active_positions[symbol]
             
-            # Remove positions we're tracking that no longer exist in Alpaca
+            # Remove positions we're tracking that no longer exist in Alpaca or have zero quantity
             symbols_to_remove = []
-            for symbol in self.active_positions:
+            for symbol in list(self.active_positions.keys()):
                 if symbol not in alpaca_symbols:
-                    self.logger.info(f"Removing position {symbol} - no longer in Alpaca")
+                    self.logger.info(f"Removing position {symbol} - no longer in Alpaca or has zero quantity")
                     symbols_to_remove.append(symbol)
             
             for symbol in symbols_to_remove:
-                del self.active_positions[symbol]
+                if symbol in self.active_positions:
+                    del self.active_positions[symbol]
                 
         except Exception as e:
             self.logger.error(f"Error refreshing positions from Alpaca: {e}")
