@@ -251,6 +251,9 @@ class MainWindow:
         
         self.positions_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
         pos_scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
+        
+        # Start periodic position updates
+        self._start_position_updates()
     
     def _create_orders_display(self, parent: ttk.Frame) -> None:
         """Create the orders display.
@@ -962,6 +965,12 @@ class MainWindow:
         self._update_orders_display()
         # Schedule next update every 5 seconds
         self.root.after(5000, self._start_order_updates)
+    
+    def _start_position_updates(self) -> None:
+        """Start periodic position display updates."""
+        self._update_positions_display()
+        # Schedule next update every 10 seconds (less frequent than orders)
+        self.root.after(10000, self._start_position_updates)
     
     def _on_symbols_changed(self, symbols: List[str]) -> None:
         """Handle symbol selection changes.
