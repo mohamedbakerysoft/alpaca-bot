@@ -520,6 +520,11 @@ class EnhancedStrategy:
                 self.logger.warning(f"No active position for {symbol}")
                 return None
             
+            # Check for and cancel any existing pending sell orders for this symbol
+            cancelled_orders = self.cancel_pending_orders(symbol)
+            if cancelled_orders > 0:
+                self.logger.info(f"Cancelled {cancelled_orders} pending sell orders for {symbol} before placing new order")
+            
             position_trade = self.active_positions[symbol]
             
             # Verify actual position quantity with Alpaca before selling
@@ -820,6 +825,52 @@ class EnhancedStrategy:
         except Exception as e:
             self.logger.error(f"Error checking recent sell orders for {symbol}: {e}")
             return False  # If we can't check, allow the position to be added
+
+    def cancel_pending_orders(self, symbol: Optional[str] = None) -> int:
+        """Cancel pending orders for a specific symbol or all pending sell orders.
+        
+        Args:
+            symbol: Symbol to cancel orders for. If None, cancels all pending sell orders.
+            
+        Returns:
+            Number of orders cancelled.
+        """
+        cancelled_count = 0
+        
+        try:
+            # Get all open orders
+            open_orders = self.alpaca_client.get_orders(status='open', limit=100)
+            if not open_orders:
+                return 0
+            
+            for order in open_orders:
+                # Filter by symbol if specified, otherwise cancel all sell orders
+                should_cancel = False
+                if symbol:
+                    should_cancel = (order.symbol == symbol and order.side == 'sell')
+                else:
+                    should_cancel = (order.side == 'sell')
+                
+                if should_cancel:
+                    try:
+                        self.alpaca_client.cancel_order(order.id)
+                        self.logger.info(f"Cancelled pending {order.side} order for {order.symbol}: {order.id}")
+                        cancelled_count += 1
+                        
+                        # Remove from our pending orders tracking
+                        if order.symbol in self.pending_orders and self.pending_orders[order.symbol] == order.id:
+                            del self.pending_orders[order.symbol]
+                            
+                    except Exception as e:
+                        self.logger.warning(f"Failed to cancel order {order.id} for {order.symbol}: {e}")
+            
+            if cancelled_count > 0:
+                self.logger.info(f"Successfully cancelled {cancelled_count} pending orders")
+                
+        except Exception as e:
+            self.logger.error(f"Error cancelling pending orders: {e}")
+            
+        return cancelled_count
 
     def _batch_check_pending_orders(self) -> None:
         """Check all pending orders in a single batch API call."""
