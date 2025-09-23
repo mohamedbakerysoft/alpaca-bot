@@ -304,33 +304,45 @@ class EnhancedStrategy:
         trend_direction = self._analyze_trend(ti)
         trend_strength = abs((ti.sma_20 - ti.sma_50) / ti.sma_50) if ti.sma_50 > 0 else 0
         
-        # BUY SIGNALS (only if no position and uptrend)
-        if not has_position and trend_direction == "UP":
+        # BUY SIGNALS (allow in uptrend or sideways markets)
+        if not has_position and trend_direction in ["UP", "SIDEWAYS"]:
             buy_score = 0
             buy_reasons = []
             
-            # RSI conditions (stronger signals)
+            # RSI conditions (more flexible)
             if ti.rsi < self.rsi_oversold:
                 buy_score += 3
                 buy_reasons.append(f"RSI oversold ({ti.rsi:.1f})")
             elif ti.rsi < self.rsi_neutral_low:
-                buy_score += 1
+                buy_score += 2
                 buy_reasons.append(f"RSI favorable ({ti.rsi:.1f})")
+            elif ti.rsi < 60:  # More flexible RSI condition
+                buy_score += 1
+                buy_reasons.append(f"RSI neutral ({ti.rsi:.1f})")
             
             # MACD bullish signal
             if ti.macd > ti.macd_signal:
                 buy_score += 2
                 buy_reasons.append("MACD bullish crossover")
+            elif ti.macd > ti.macd_signal * 0.9:  # Near crossover
+                buy_score += 1
+                buy_reasons.append("MACD approaching bullish")
             
             # Price near support (Bollinger Band lower)
-            if current_price <= ti.bollinger_lower * 1.02:  # Within 2% of lower band
+            if current_price <= ti.bollinger_lower * 1.05:  # Within 5% of lower band
                 buy_score += 2
                 buy_reasons.append("Price near support level")
+            elif current_price <= ti.bollinger_middle:  # Below middle band
+                buy_score += 1
+                buy_reasons.append("Price below middle band")
             
-            # Strong uptrend confirmation
-            if trend_strength > self.trend_strength_threshold:
+            # Trend confirmation (more flexible)
+            if trend_direction == "UP":
                 buy_score += 2
-                buy_reasons.append(f"Strong uptrend ({trend_strength*100:.1f}%)")
+                buy_reasons.append("Uptrend confirmed")
+            elif trend_direction == "SIDEWAYS":
+                buy_score += 1
+                buy_reasons.append("Sideways market opportunity")
             
             # Volume confirmation
             if hasattr(ti, 'volume_ratio') and ti.volume_ratio > self.volume_spike_threshold:
@@ -338,12 +350,12 @@ class EnhancedStrategy:
                 buy_reasons.append(f"High volume ({ti.volume_ratio:.1f}x)")
             
             # Price action confirmation
-            if hasattr(ti, 'ema_12') and hasattr(ti, 'ema_26') and current_price > ti.ema_12 and ti.ema_12 > ti.ema_26:
+            if hasattr(ti, 'ema_12') and hasattr(ti, 'ema_26') and current_price > ti.ema_12:
                 buy_score += 1
-                buy_reasons.append("Bullish price action")
+                buy_reasons.append("Price above EMA12")
             
-            # Generate BUY signal if score is high enough
-            if buy_score >= 4:  # Require strong confirmation
+            # Generate BUY signal if score is high enough (reduced threshold)
+            if buy_score >= 3:  # More flexible confirmation
                 reason = f"Score: {buy_score}/10 - " + "; ".join(buy_reasons)
                 signals.append(("BUY", reason))
                 self.logger.info(f"{symbol}: BUY signal generated - {reason}")
