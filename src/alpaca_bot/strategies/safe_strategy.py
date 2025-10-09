@@ -530,6 +530,67 @@ class SafeStrategy:
             self.logger.error(f"Error executing safe trade for {signal.symbol}: {e}")
             return None
     
+    def sell_all_positions(self) -> Dict[str, bool]:
+        """بيع جميع المراكز النشطة.
+        
+        Returns:
+            Dict[str, bool]: قاموس يحتوي على رمز السهم ونتيجة البيع (نجح/فشل)
+        """
+        results = {}
+        positions_to_close = list(self.active_positions.keys())
+        
+        if not positions_to_close:
+            self.logger.info("لا توجد مراكز نشطة للبيع")
+            return results
+        
+        self.logger.warning(f"🚨 بدء بيع جميع المراكز النشطة: {len(positions_to_close)} مركز")
+        
+        for symbol in positions_to_close:
+            try:
+                trade = self.active_positions[symbol]
+                
+                # الحصول على السعر الحالي
+                current_data = self.analyze_symbol(symbol)
+                if not current_data:
+                    self.logger.error(f"❌ لا يمكن الحصول على بيانات {symbol}")
+                    results[symbol] = False
+                    continue
+                
+                current_price = self._get_current_price(current_data)
+                if not current_price:
+                    self.logger.error(f"❌ لا يمكن الحصول على السعر الحالي لـ {symbol}")
+                    results[symbol] = False
+                    continue
+                
+                # إنشاء إشارة بيع طارئة
+                sell_signal = SafeTradeSignal(
+                    symbol=symbol,
+                    action='SELL',
+                    confidence=1.0,
+                    reason='بيع طارئ - إغلاق جميع المراكز',
+                    price=current_price
+                )
+                
+                # تنفيذ البيع
+                success = self._execute_sell(sell_signal)
+                results[symbol] = success
+                
+                if success:
+                    self.logger.info(f"✅ تم بيع {symbol} بنجاح")
+                else:
+                    self.logger.error(f"❌ فشل في بيع {symbol}")
+                    
+            except Exception as e:
+                self.logger.error(f"❌ خطأ في بيع {symbol}: {e}")
+                results[symbol] = False
+        
+        successful_sales = sum(1 for success in results.values() if success)
+        total_positions = len(results)
+        
+        self.logger.warning(f"🚨 انتهى بيع جميع المراكز: {successful_sales}/{total_positions} نجح")
+        
+        return results
+    
     def get_status(self) -> Dict:
         """الحصول على حالة الاستراتيجية"""
         return {

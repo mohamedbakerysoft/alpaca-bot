@@ -360,6 +360,9 @@ class MainWindow:
                     order_callback=self._trigger_order_update
                 )
                 
+                # تحديث مرجع الاستراتيجية في لوحة التداول
+                self.trading_panel.set_strategy(self.strategy)
+                
                 self.logger.info("API client initialized successfully")
                 return True
             else:

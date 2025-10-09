@@ -21,14 +21,16 @@ from ..utils.error_handler import ErrorHandler, safe_execute
 class TradingPanel:
     """Trading panel component."""
     
-    def __init__(self, parent: tk.Widget):
+    def __init__(self, parent: tk.Widget, strategy=None):
         """Initialize the trading panel.
         
         Args:
             parent: Parent widget.
+            strategy: Trading strategy instance.
         """
         self.logger = get_logger(__name__)
         self.error_handler = ErrorHandler()
+        self.strategy = strategy
         
         # Create main frame with enhanced styling
         self.frame = ttk.LabelFrame(parent, text="Trading Panel", padding=8)
@@ -159,7 +161,7 @@ class TradingPanel:
         # Close all positions button
         close_all_btn = ttk.Button(
             emergency_frame,
-            text="🚨 Close All Positions",
+            text="🚨 بيع جميع المراكز",
             command=self._close_all_positions,
             style="Accent.TButton"
         )
@@ -757,22 +759,76 @@ class TradingPanel:
             self.logger.error(f"Error setting risk parameters: {e}")
     
     def _close_all_positions(self) -> None:
-        """Close all open positions."""
+        """بيع جميع المراكز المفتوحة."""
         try:
-            # This would integrate with the trading strategy
-            # For now, just show a confirmation dialog
-            import tkinter.messagebox as msgbox
-            result = msgbox.askyesno(
-                "Confirm Close All",
-                "Are you sure you want to close ALL positions?\n\nThis action cannot be undone.",
+            if not self.strategy:
+                messagebox.showerror(
+                    "خطأ",
+                    "لا يمكن الوصول إلى الاستراتيجية. تأكد من تشغيل البوت أولاً."
+                )
+                return
+            
+            # التحقق من وجود مراكز نشطة
+            active_positions = getattr(self.strategy, 'active_positions', {})
+            if not active_positions:
+                messagebox.showinfo(
+                    "لا توجد مراكز",
+                    "لا توجد مراكز نشطة للبيع حالياً."
+                )
+                return
+            
+            # تأكيد البيع
+            result = messagebox.askyesno(
+                "تأكيد بيع جميع المراكز",
+                f"هل أنت متأكد من بيع جميع المراكز النشطة؟\n\n"
+                f"عدد المراكز: {len(active_positions)}\n"
+                f"الرموز: {', '.join(active_positions.keys())}\n\n"
+                f"⚠️ هذا الإجراء لا يمكن التراجع عنه!",
                 icon="warning"
             )
+            
             if result:
-                # TODO: Implement actual position closing logic
-                self.status_indicator.config(text="● CLOSING ALL", foreground="red")
-                self.logger.info("Closing all positions...")
+                # تنفيذ البيع
+                self.logger.warning("🚨 بدء بيع جميع المراكز بناءً على طلب المستخدم")
+                
+                # تحديث حالة الواجهة
+                if hasattr(self, 'status_indicator'):
+                    self.status_indicator.config(text="● جاري البيع...", foreground="red")
+                
+                # استدعاء دالة بيع جميع المراكز
+                results = self.strategy.sell_all_positions()
+                
+                # عرض النتائج
+                successful_sales = sum(1 for success in results.values() if success)
+                total_positions = len(results)
+                
+                if successful_sales == total_positions:
+                    messagebox.showinfo(
+                        "تم البيع بنجاح",
+                        f"✅ تم بيع جميع المراكز بنجاح!\n\n"
+                        f"تم بيع: {successful_sales}/{total_positions} مراكز"
+                    )
+                    self.logger.info(f"✅ تم بيع جميع المراكز بنجاح: {successful_sales}/{total_positions}")
+                else:
+                    failed_symbols = [symbol for symbol, success in results.items() if not success]
+                    messagebox.showwarning(
+                        "بيع جزئي",
+                        f"⚠️ تم بيع {successful_sales} من {total_positions} مراكز\n\n"
+                        f"فشل في بيع: {', '.join(failed_symbols)}\n\n"
+                        f"تحقق من السجلات للمزيد من التفاصيل."
+                    )
+                    self.logger.warning(f"⚠️ بيع جزئي: {successful_sales}/{total_positions} نجح")
+                
+                # إعادة تعيين حالة الواجهة
+                if hasattr(self, 'status_indicator'):
+                    self.status_indicator.config(text="● جاهز", foreground="green")
+                    
         except Exception as e:
-            self.logger.error(f"Error closing positions: {e}")
+            self.logger.error(f"❌ خطأ في بيع جميع المراكز: {e}")
+            messagebox.showerror(
+                "خطأ في البيع",
+                f"حدث خطأ أثناء بيع المراكز:\n\n{str(e)}\n\nتحقق من السجلات للمزيد من التفاصيل."
+            )
     
     def _cancel_all_orders(self) -> None:
         """Cancel all pending orders."""
@@ -883,3 +939,12 @@ class TradingPanel:
             
         except Exception as e:
             self.logger.error(f"Error updating quick stats: {e}")
+    
+    def set_strategy(self, strategy):
+        """تحديث مرجع الاستراتيجية.
+        
+        Args:
+            strategy: Trading strategy instance.
+        """
+        self.strategy = strategy
+        self.logger.info("تم تحديث مرجع الاستراتيجية في لوحة التداول")
