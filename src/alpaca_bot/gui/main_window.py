@@ -17,6 +17,7 @@ from typing import Dict, List, Optional
 from ..config.settings import settings
 from ..services.alpaca_client import AlpacaClient
 from ..strategies.simple_strategy import SimpleStrategy
+from ..strategies.safe_strategy import SafeStrategy
 from ..utils.logging_utils import get_logger, setup_logging
 from ..utils.error_handler import (
     ErrorHandler, TradingBotError, APIConnectionError, 
@@ -40,7 +41,7 @@ class MainWindow:
         
         # Initialize components
         self.alpaca_client: Optional[AlpacaClient] = None
-        self.strategy: Optional[SimpleStrategy] = None
+        self.strategy: Optional[SafeStrategy] = None
         self.trading_thread: Optional[threading.Thread] = None
         self.is_trading = False
         self.selected_symbols: List[str] = []
@@ -352,8 +353,8 @@ class MainWindow:
                 # Market status will be updated by _update_market_status method
                 # which is called periodically by _update_time_display
                 
-                # Initialize strategy with account and order update callbacks
-                self.strategy = SimpleStrategy(self.alpaca_client)
+                # Initialize strategy with account and order update callbacks - SAFE MODE
+                self.strategy = SafeStrategy(self.alpaca_client)
                 self.strategy.set_callbacks(
                     account_callback=self._trigger_account_update,
                     order_callback=self._trigger_order_update
@@ -561,21 +562,27 @@ class MainWindow:
                     
                     def _process_symbol():
                         # Analyze symbol
+                        self.logger.debug(f"Processing symbol: {symbol}")
                         stock_data = self.strategy.analyze_symbol(symbol)
+                        self.logger.debug(f"analyze_symbol returned: {type(stock_data)} for {symbol}")
+                        
                         if not stock_data:
+                            self.logger.debug(f"No stock data available for {symbol}")
                             return
                         
                         # Generate signals
+                        self.logger.debug(f"Calling generate_signals with: {type(stock_data)} for {symbol}")
                         signals = self.strategy.generate_signals(stock_data)
                         
                         # Execute trades based on signals
-                        for signal_type, reason in signals:
+                        for signal in signals:
                             if not self.is_trading:
                                 break
                             
-                            trade = self.strategy.execute_trade(symbol, signal_type, reason)
-                            if trade:
-                                self.logger.info(f"{signal_type} signal executed for {symbol}: {reason}")
+                            # Execute the signal directly using the strategy's execute_signal method
+                            success = self.strategy.execute_signal(signal)
+                            if success:
+                                self.logger.info(f"{signal.action} signal executed for {signal.symbol}: {signal.reason}")
                         
                         # Update displays
                         self.root.after(0, self._update_displays)
