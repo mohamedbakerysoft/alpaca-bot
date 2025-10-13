@@ -57,37 +57,26 @@ class TradingPanel:
     
     def _create_widgets(self) -> None:
         """Create the panel widgets."""
-        # Create a more compact layout with key info at the top
+        # Create a simplified layout without tabs
         
-        # Quick stats section (always visible)
+        # Quick stats section (always visible at top)
         quick_stats_frame = ttk.Frame(self.frame)
         quick_stats_frame.pack(fill=tk.X, pady=(0, 5))
-        
         self._create_quick_stats_section(quick_stats_frame)
         
-        # Create notebook for detailed sections
-        notebook = ttk.Notebook(self.frame)
-        notebook.pack(fill=tk.BOTH, expand=True)
+        # Create horizontal layout for main sections
+        main_sections_frame = ttk.Frame(self.frame)
+        main_sections_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Statistics tab
-        stats_frame = ttk.Frame(notebook)
-        notebook.add(stats_frame, text="📊 Stats")
-        self._create_statistics_section(stats_frame)
-        
-        # Risk Management tab
-        risk_frame = ttk.Frame(notebook)
-        notebook.add(risk_frame, text="⚠️ Risk")
-        self._create_risk_management_section(risk_frame)
-        
-        # Manual Trading tab
-        manual_frame = ttk.Frame(notebook)
-        notebook.add(manual_frame, text="🎯 Manual")
-        self._create_manual_trading_section(manual_frame)
-        
-        # Quick Actions tab
-        actions_frame = ttk.Frame(notebook)
-        notebook.add(actions_frame, text="⚡ Actions")
+        # Left section: Quick Actions (most important)
+        actions_frame = ttk.LabelFrame(main_sections_frame, text="⚡ إجراءات سريعة", padding=5)
+        actions_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 2))
         self._create_quick_actions_section(actions_frame)
+        
+        # Right section: Risk Management (essential)
+        risk_frame = ttk.LabelFrame(main_sections_frame, text="⚠️ إدارة المخاطر", padding=5)
+        risk_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(2, 0))
+        self._create_risk_management_section(risk_frame)
     
     def _create_quick_stats_section(self, parent: ttk.Frame) -> None:
         """Create quick stats section that's always visible.

@@ -87,7 +87,7 @@ class Settings:
         # Additional risk management parameters
         self.take_profit_percentage: float = config(
             "TAKE_PROFIT_PERCENTAGE",
-            default=0.001,  # 0.10% take profit for unified risk management
+            default=0.015,  # 1.5% take profit (increased from 0.1% for better selling)
             cast=float
         )
         

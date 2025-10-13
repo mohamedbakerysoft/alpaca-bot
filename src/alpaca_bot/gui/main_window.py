@@ -56,6 +56,14 @@ class MainWindow:
         self.style = ttk.Style()
         self.style.theme_use('clam')
         
+        # Configure custom button styles
+        self.style.configure("Danger.TButton", foreground="white", background="red")
+        self.style.map("Danger.TButton", 
+                      background=[('active', 'darkred'), ('pressed', 'darkred')])
+        self.style.configure("Accent.TButton", foreground="white", background="green")
+        self.style.map("Accent.TButton", 
+                      background=[('active', 'darkgreen'), ('pressed', 'darkgreen')])
+        
         # Create GUI components
         self._create_menu()
         self._create_main_frame()
@@ -153,7 +161,16 @@ class MainWindow:
             command=self._toggle_trading,
             style="Accent.TButton"
         )
-        self.start_stop_btn.pack(fill=tk.X, pady=(0, 10))
+        self.start_stop_btn.pack(fill=tk.X, pady=(0, 5))
+        
+        # Emergency Sell All button - Prominent and easily accessible
+        self.sell_all_btn = ttk.Button(
+            control_frame,
+            text="🚨 بيع جميع المراكز",
+            command=self._emergency_sell_all,
+            style="Danger.TButton"
+        )
+        self.sell_all_btn.pack(fill=tk.X, pady=(0, 10))
         
         # Trading status
         self.status_var = tk.StringVar(value="Stopped")
@@ -191,37 +208,34 @@ class MainWindow:
         self.stock_selector = StockSelectorFrame(parent, self._on_symbols_changed)
     
     def _create_display_panel(self, parent: ttk.Frame) -> None:
-        """Create the display panel.
+        """Create the simplified display panel.
         
         Args:
             parent: Parent frame.
         """
-        # Create notebook for tabbed display
-        self.main_notebook = ttk.Notebook(parent)
-        self.main_notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Create a single frame instead of tabs for cleaner interface
+        main_frame = ttk.Frame(parent)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Store tab frames for lazy loading
-        self.tab_frames = {}
-        self.tab_initialized = {}
+        # Create a paned window to split positions and orders vertically
+        paned_window = ttk.PanedWindow(main_frame, orient=tk.VERTICAL)
+        paned_window.pack(fill=tk.BOTH, expand=True)
         
-        # Positions tab
-        positions_frame = ttk.Frame(self.main_notebook)
-        self.main_notebook.add(positions_frame, text="Positions")
-        self.tab_frames['positions'] = positions_frame
-        self.tab_initialized['positions'] = False
+        # Positions section (top half)
+        positions_frame = ttk.LabelFrame(paned_window, text="📊 المراكز النشطة", padding=5)
+        paned_window.add(positions_frame, weight=3)
         
-        # Orders tab
-        orders_frame = ttk.Frame(self.main_notebook)
-        self.main_notebook.add(orders_frame, text="Orders")
-        self.tab_frames['orders'] = orders_frame
-        self.tab_initialized['orders'] = False
+        # Orders section (bottom half)
+        orders_frame = ttk.LabelFrame(paned_window, text="📋 الأوامر", padding=5)
+        paned_window.add(orders_frame, weight=2)
         
-        # Initialize first tab only
+        # Store frames for reference
+        self.positions_frame = positions_frame
+        self.orders_frame = orders_frame
+        
+        # Initialize both displays
         self._create_positions_display(positions_frame)
-        self.tab_initialized['positions'] = True
-        
-        # Bind tab change event for lazy loading
-        self.main_notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+        self._create_orders_display(orders_frame)
     
     
     def _create_positions_display(self, parent: ttk.Frame) -> None:
@@ -541,6 +555,92 @@ class MainWindow:
         
         safe_execute(
             _stop_trading_internal,
+            default_return=None,
+            log_errors=True
+        )
+    
+    def _emergency_sell_all(self) -> None:
+        """Emergency sell all positions - accessible from main control panel."""
+        def _perform_emergency_sell():
+            if not self.strategy:
+                messagebox.showerror(
+                    "خطأ",
+                    "لا يمكن الوصول إلى الاستراتيجية. تأكد من تشغيل البوت أولاً."
+                )
+                return
+            
+            # التحقق من وجود مراكز نشطة
+            active_positions = getattr(self.strategy, 'active_positions', {})
+            if not active_positions:
+                messagebox.showinfo(
+                    "لا توجد مراكز",
+                    "لا توجد مراكز نشطة للبيع حالياً."
+                )
+                return
+            
+            # تأكيد البيع مع تحذير واضح
+            result = messagebox.askyesno(
+                "⚠️ تأكيد بيع جميع المراكز",
+                f"هل أنت متأكد من بيع جميع المراكز النشطة؟\n\n"
+                f"📊 عدد المراكز: {len(active_positions)}\n"
+                f"📈 الرموز: {', '.join(active_positions.keys())}\n\n"
+                f"🚨 هذا الإجراء لا يمكن التراجع عنه!\n"
+                f"💡 سيتم بيع جميع المراكز بسعر السوق الحالي",
+                icon="warning"
+            )
+            
+            if result:
+                # تحديث حالة الزر
+                self.sell_all_btn.config(text="⏳ جاري البيع...", state="disabled")
+                self.status_var.set("Selling All Positions...")
+                
+                try:
+                    # تنفيذ البيع
+                    self.logger.warning("🚨 بدء بيع جميع المراكز بناءً على طلب المستخدم من الزر الرئيسي")
+                    
+                    # استدعاء دالة بيع جميع المراكز
+                    results = self.strategy.sell_all_positions()
+                    
+                    # عرض النتائج
+                    successful_sales = sum(1 for success in results.values() if success)
+                    total_positions = len(results)
+                    
+                    if successful_sales == total_positions:
+                        messagebox.showinfo(
+                            "✅ تم البيع بنجاح",
+                            f"تم بيع جميع المراكز بنجاح!\n\n"
+                            f"📊 تم بيع: {successful_sales}/{total_positions} مراكز\n"
+                            f"💰 تحقق من تاب المراكز لرؤية النتائج النهائية"
+                        )
+                        self.logger.info(f"✅ تم بيع جميع المراكز بنجاح من الزر الرئيسي: {successful_sales}/{total_positions}")
+                    else:
+                        failed_symbols = [symbol for symbol, success in results.items() if not success]
+                        messagebox.showwarning(
+                            "⚠️ بيع جزئي",
+                            f"تم بيع {successful_sales} من {total_positions} مراكز\n\n"
+                            f"❌ فشل في بيع: {', '.join(failed_symbols)}\n\n"
+                            f"💡 تحقق من السجلات للمزيد من التفاصيل"
+                        )
+                        self.logger.warning(f"⚠️ بيع جزئي من الزر الرئيسي: {successful_sales}/{total_positions} نجح")
+                    
+                except Exception as e:
+                    self.logger.error(f"❌ خطأ في بيع جميع المراكز من الزر الرئيسي: {e}")
+                    messagebox.showerror(
+                        "❌ خطأ في البيع",
+                        f"حدث خطأ أثناء بيع المراكز:\n\n{str(e)}\n\n"
+                        f"💡 تحقق من السجلات للمزيد من التفاصيل"
+                    )
+                finally:
+                    # إعادة تعيين حالة الزر
+                    self.sell_all_btn.config(text="🚨 بيع جميع المراكز", state="normal")
+                    if self.is_trading:
+                        self.status_var.set("Running")
+                    else:
+                        self.status_var.set("Stopped")
+        
+        # تنفيذ آمن للعملية
+        safe_execute(
+            _perform_emergency_sell,
             default_return=None,
             log_errors=True
         )
@@ -951,23 +1051,7 @@ class MainWindow:
         # Schedule next update every 45 seconds (further reduced for better performance)
         self.root.after(45000, self._start_position_updates)
     
-    def _on_tab_changed(self, event) -> None:
-        """Handle tab change events for lazy loading.
-        
-        Args:
-            event: Tab change event.
-        """
-        try:
-            selected_tab = self.main_notebook.select()
-            tab_text = self.main_notebook.tab(selected_tab, "text")
-            
-            # Initialize tab content if not already done
-            if tab_text == "Orders" and not self.tab_initialized['orders']:
-                self._create_orders_display(self.tab_frames['orders'])
-                self.tab_initialized['orders'] = True
-                
-        except Exception as e:
-            self.logger.error(f"Error handling tab change: {e}")
+
     
     def _on_symbols_changed(self, symbols: List[str]) -> None:
         """Handle symbol selection changes.
