@@ -373,12 +373,108 @@ class SafeStrategy:
         return False
     
     def update_positions(self):
-        """تحديث المراكز المفتوحة."""
+        """تحديث المراكز المفتوحة ومراقبة شروط البيع."""
         try:
-            # تحديث بسيط للمراكز
-            pass
+            # الحصول على المراكز الحالية من Alpaca
+            positions = self.alpaca_client.get_positions()
+            if not positions:
+                return
+            
+            self.logger.info(f"🔍 مراقبة {len(positions)} مركز للبيع...")
+            
+            for position in positions:
+                symbol = position.symbol
+                current_price = float(position.current_price) if position.current_price else 0
+                unrealized_plpc = float(position.unrealized_plpc) if position.unrealized_plpc else 0
+                unrealized_pl = float(position.unrealized_pl) if position.unrealized_pl else 0
+                
+                if current_price <= 0:
+                    continue
+                
+                # تحويل النسبة المئوية (Alpaca يعطيها كعدد عشري)
+                profit_loss_pct = unrealized_plpc * 100
+                
+                self.logger.info(f"📊 {symbol}: السعر الحالي ${current_price:.2f}, الربح/الخسارة {profit_loss_pct:.2f}%")
+                
+                # فحص شروط البيع
+                should_sell = False
+                sell_reason = ""
+                
+                # 1. Take Profit (1.5%)
+                if profit_loss_pct >= (self.take_profit_pct * 100):
+                    should_sell = True
+                    sell_reason = f"Take Profit: ربح {profit_loss_pct:.2f}%"
+                
+                # 2. Stop Loss (2%)
+                elif profit_loss_pct <= -(self.stop_loss_pct * 100):
+                    should_sell = True
+                    sell_reason = f"Stop Loss: خسارة {profit_loss_pct:.2f}%"
+                
+                if should_sell:
+                    self.logger.warning(f"🚨 {symbol} يحتاج للبيع: {sell_reason}")
+                    
+                    # إنشاء إشارة بيع
+                    sell_signal = SafeTradeSignal(
+                        symbol=symbol,
+                        action="SELL",
+                        confidence=1.0,
+                        reason=sell_reason,
+                        price=current_price
+                    )
+                    
+                    # تنفيذ البيع
+                    success = self._execute_sell_alpaca_position(position, sell_signal)
+                    if success:
+                        self.logger.info(f"✅ تم بيع {symbol} بنجاح: {sell_reason}")
+                    else:
+                        self.logger.error(f"❌ فشل في بيع {symbol}")
+                        
         except Exception as e:
             self.logger.error(f"Error updating positions: {e}")
+    
+    def _execute_sell_alpaca_position(self, position, signal: SafeTradeSignal) -> bool:
+        """تنفيذ بيع مركز موجود في Alpaca."""
+        try:
+            symbol = signal.symbol
+            quantity = abs(float(position.qty))  # استخدام القيمة المطلقة للكمية
+            
+            if quantity <= 0:
+                self.logger.warning(f"كمية غير صالحة للبيع {symbol}: {quantity}")
+                return False
+            
+            # تنفيذ أمر البيع
+            order = self.alpaca_client.place_order(
+                symbol=symbol,
+                qty=quantity,
+                side='sell',
+                order_type='market',
+                time_in_force='day'
+            )
+            
+            if order:
+                # حساب الربح/الخسارة المتوقعة
+                unrealized_pl = float(position.unrealized_pl) if position.unrealized_pl else 0
+                self.daily_pnl += unrealized_pl
+                self.daily_trades_count += 1
+                
+                self.logger.info(f"✅ تم وضع أمر بيع {symbol}: {quantity} سهم - {signal.reason}")
+                
+                # تحديث callbacks
+                if self.account_update_callback:
+                    self.account_update_callback()
+                if self.order_update_callback:
+                    self.order_update_callback()
+                if self.position_update_callback:
+                    self.position_update_callback()
+                
+                return True
+            else:
+                self.logger.error(f"❌ فشل في وضع أمر البيع لـ {symbol}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"❌ خطأ في بيع {symbol}: {e}")
+            return False
     
     def analyze_symbol(self, symbol: str) -> Optional[StockData]:
         """تحليل رمز سهم واحد."""
